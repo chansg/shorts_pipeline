@@ -159,7 +159,12 @@ def generate_manifest(ep: st.Episode, use_llm: bool = True,
             "motion_prompt": d["motion_prompt"] or prompt_gen.DEFAULT_MOTION,
             "animate": d["animate"],
         })
-        hits = prompt_gen.lint((d["prompt"] or "") + " " + (d["motion_prompt"] or ""))
+        # Lint user-facing text only — the stock DEFAULT_MOTION contains the
+        # word "bodies" in its own safety instruction and must not self-flag.
+        motion_to_lint = d["motion_prompt"] or ""
+        if motion_to_lint == prompt_gen.DEFAULT_MOTION:
+            motion_to_lint = ""
+        hits = prompt_gen.lint((d["prompt"] or "") + " " + motion_to_lint)
         if hits:
             notes.append(f"Scene {i:02d}: possible filter triggers -> {', '.join(hits)}")
 
