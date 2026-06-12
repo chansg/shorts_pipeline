@@ -116,6 +116,10 @@ def handoff(ep: st.Episode) -> tuple[list[str], list[str]]:
                 twin.unlink()
         shutil.copy2(src, dest)
         placed.append(dest.name)
+    # Renders that predate fingerprint recording can't prove they match the
+    # new media — mark them stale so the build step re-runs instead of skipping.
+    if ep.load_state().get("rendered_assets") is None:
+        ep.save_state(rendered_assets=[])
     return placed, warnings
 
 
@@ -201,6 +205,7 @@ def voice_assemble(ep: st.Episode, music_path: Path | None,
                              "duration": round(sc.duration, 2)})
             t += sc.duration
         ep.save_state(rendered_script_hash=s_hash, scene_timeline=timeline,
+                      rendered_assets=st.assets_fingerprint(),
                       music=str(music) if music else "", approved=False)
         yield {"done": True, "output": ep.output_path, "timeline": timeline,
                "notes": notes}

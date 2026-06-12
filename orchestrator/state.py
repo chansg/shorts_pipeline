@@ -143,10 +143,15 @@ class Episode:
         return present == {dest.name for _, dest in pairs}
 
     def assemble_done(self) -> bool:
+        """Rendered AND still current: same script and the same media files in
+        assets/images (so swapping a still for a Veo clip forces a re-render)."""
         if not self.output_path.exists():
             return False
         state = self.load_state()
-        return state.get("rendered_script_hash") == script_hash(self.script_text())
+        if state.get("rendered_script_hash") != script_hash(self.script_text()):
+            return False
+        recorded = state.get("rendered_assets")
+        return recorded is None or recorded == assets_fingerprint()
 
     def status(self) -> dict[str, bool]:
         return {
@@ -166,6 +171,15 @@ class Episode:
             if not st[stage]:
                 return stage
         return "done"
+
+
+def assets_fingerprint() -> list:
+    """Identity of the current pipeline input media (name + mtime), JSON-safe.
+    Recorded at render time so a later handoff invalidates the old render."""
+    from modules.visuals import VALID_EXT
+    return [[p.name, int(p.stat().st_mtime)]
+            for p in sorted(config.IMAGES_DIR.iterdir())
+            if p.suffix.lower() in VALID_EXT]
 
 
 def list_scripts() -> list[str]:

@@ -478,6 +478,11 @@ def run_animate_batch(name: str, selected: list[str], confirmed: bool, force: bo
     ep = _require(name, "stills", "generate all stills first")
     _check_stills_approved(ep)
     selected = list(selected or [])
+    if not selected:
+        raise gr.Error(
+            "No scenes are selected to animate. Tick scenes above and re-run — "
+            "or, if this episode should be all stills, use the "
+            "'Skip animation → all stills' button instead.", duration=None)
     save_animate_selection(name, selected)
     to_bill = [s for s in selected
                if force or not (ep.clips_dir / f"{s}.mp4").exists()]
@@ -866,18 +871,33 @@ def build_app() -> gr.Blocks:
         char_del_btn.click(remove_character, [ep_state, char_del_dd],
                            refs_outputs + [refs_msg])
 
-        gen_prompts_btn.click(generate_prompts,
-                              [ep_state, use_llm_cb, clip_dur],
-                              row_comps + [prompts_note, banner])
-        save_prompts_btn.click(save_prompts, [ep_state] + row_inputs,
-                               [prompts_save_md, banner])
+        # The Stills/Animate/Handoff tabs list scenes from the manifest, so any
+        # event that (re)writes the manifest must refresh them — otherwise an
+        # episode whose prompts were generated mid-session shows empty scene
+        # pickers until the page is reloaded.
+        def _chain_scene_refresh(evt):
+            (evt.then(load_stills_tab, ep_state,
+                      [stills_gallery, regen_dd, stills_msg])
+                .then(load_animate_tab, ep_state,
+                      [animate_cbg, test_dd, clip_preview, animate_info])
+                .then(load_handoff_tab, ep_state, handoff_md))
+
+        _chain_scene_refresh(
+            gen_prompts_btn.click(generate_prompts,
+                                  [ep_state, use_llm_cb, clip_dur],
+                                  row_comps + [prompts_note, banner]))
+        _chain_scene_refresh(
+            save_prompts_btn.click(save_prompts, [ep_state] + row_inputs,
+                                   [prompts_save_md, banner]))
 
         stills_btn.click(run_stills, [ep_state, stills_force_cb],
                          [stills_status, stills_gallery, banner])
         regen_btn.click(regen_still, [ep_state, regen_dd],
                         [stills_status, stills_gallery])
         approve_stills_btn.click(approve_stills, ep_state,
-                                 [stills_msg, banner])
+                                 [stills_msg, banner]) \
+            .then(load_animate_tab, ep_state,
+                  [animate_cbg, test_dd, clip_preview, animate_info])
 
         save_sel_btn.click(save_animate_selection, [ep_state, animate_cbg],
                            [animate_info, banner])
@@ -886,7 +906,9 @@ def build_app() -> gr.Blocks:
         batch_btn.click(run_animate_batch,
                         [ep_state, animate_cbg, batch_confirm_cb,
                          batch_force_cb],
-                        [animate_status, banner])
+                        [animate_status, banner]) \
+            .then(lambda n: load_animate_tab(n)[3], ep_state, animate_info) \
+            .then(load_handoff_tab, ep_state, handoff_md)
         no_anim_btn.click(confirm_no_animate, ep_state,
                           [animate_status, banner])
 
