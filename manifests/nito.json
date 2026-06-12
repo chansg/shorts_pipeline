@@ -1,0 +1,73 @@
+{
+  "_comment": "Episode: Nito, the First of the Dead. Still prompt (gen) + motion_prompt (animation) are split. Scene 04 is the action/fight beat — drop your fight reference into refs/ as nito_fight.png and add 'nito_fight' to scene 04's refs to condition the still on your pose/composition while keeping the channel style.",
+  "defaults": {
+    "image_model": "gemini-3.1-flash-image",
+    "image_aspect_ratio": "9:16",
+    "aspect_ratio": "9:16",
+    "duration_seconds": 8,
+    "negative_prompt": "text, watermark, logo, distorted anatomy, morphing, warping limbs, warping weapons, flickering geometry, extra limbs, deformed skulls",
+    "style_suffix": "dark fantasy concept art, muted desaturated palette, volumetric haze, dramatic chiaroscuro, painterly, cinematic, film grain"
+  },
+
+  "style_refs": ["refs/style_dark_fantasy.png"],
+
+  "characters": {
+    "nito": ["refs/nito_ref.png"]
+  },
+
+  "clips": [
+    {
+      "image": "01.png",
+      "name": "dawn_of_fire",
+      "refs": [],
+      "prompt": "The First Flame igniting in primordial darkness at the dawn of the world, vast and cosmic, embers and pale light spilling into an endless grey void. No figures. Awe, emptiness, beginning."
+    },
+    {
+      "image": "02.png",
+      "name": "nito_reveal",
+      "refs": ["nito"],
+      "prompt": "Nito, the First of the Dead: a colossal figure formed of fused human skeletons draped in a hair-like black cloak, cradling a single glowing Lord Soul, standing in a pitch-black catacomb. Keep his design consistent with the reference. Statuesque, dread-inspiring, centered.",
+      "motion_prompt": "Cinematic slow motion: the towering skeletal lord looms motionless as faint death-light pulses from the Lord Soul in his grip, embers and ash drifting upward, slow push-in. Stable anatomy, no warping bones."
+    },
+    {
+      "image": "03.png",
+      "name": "death_soul_forms",
+      "refs": [],
+      "prompt": "A storm of bones and skulls drawn together by a sickly green-black miasma, fusing into a vast humanoid mass, rot and decay swirling through the air. Ominous, alive with death.",
+      "motion_prompt": "Slow motion: skeletons and dust spiral inward and bind together as a creeping miasma coils through them, faint motes rising. Slow, churning, deliberate — no fast morphing."
+    },
+    {
+      "image": "04.png",
+      "name": "war_on_dragons",
+      "refs": [],
+      "prompt": "A great miasma of death and disease rolling across an ancient battlefield, engulfing colossal stone-scaled dragons that rot and crumble within it, distant lightning and firestorms on the grey horizon. Epic scale, apocalyptic.",
+      "motion_prompt": "Cinematic slow motion: a vast wave of black-green plague rolls forward and swallows a falling dragon as it rots from within, ash and embers streaming past, slow sweeping camera. Weighty, epic, stable forms — no warping limbs or wings."
+    },
+    {
+      "image": "05.png",
+      "name": "the_descent",
+      "refs": [],
+      "prompt": "A lone immense dark figure turning away from a distant golden city of light, descending a vast stone stair into a black abyss below. Solitude, finality, renunciation."
+    },
+    {
+      "image": "06.png",
+      "name": "tomb_of_giants",
+      "refs": [],
+      "prompt": "An immense underground necropolis of colossal skeletons and giant sarcophagi, swallowed in light-devouring darkness, a single faint skull-lantern glow far off. Cavernous, sepulchral, cold.",
+      "motion_prompt": "Slow drift forward through the giant tomb, faint dust and cold light-motes moving, a distant lantern flickering. Still, vast, reverent — architecture stays solid."
+    },
+    {
+      "image": "07.png",
+      "name": "overseeing_death",
+      "refs": [],
+      "prompt": "The colossal skeletal lord seated in darkness amid countless small skeletons kneeling before him, faint death-light, his domain stretching endlessly into black. Ominous dominion.",
+      "motion_prompt": "Slow motion: the kneeling skeletons stir faintly as death-light pulses across the dark hall, ash drifting, a slow upward camera rise. Minimal motion, eerie, stable figures."
+    },
+    {
+      "image": "08.png",
+      "name": "patient_dark",
+      "refs": [],
+      "prompt": "Only the skeletal lord's faint glowing eyes visible in total blackness, a few drifting embers, a single thin shaft of pale light. Patient, eternal, final."
+    }
+  ]
+}
