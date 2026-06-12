@@ -1,0 +1,17 @@
+# Core
+python-dotenv
+numpy
+pillow
+
+# Voiceover — ElevenLabs only (needs ELEVENLABS_API_KEY in .env)
+elevenlabs
+
+# Captions
+faster-whisper
+
+# Optional rewrite backend (REWRITE_BACKEND="claude" in config.py)
+anthropic
+# REWRITE_BACKEND="ollama" uses a local Ollama service (no pip package)
+
+# System dependency (NOT pip): ffmpeg + ffprobe must be installed and on PATH.
+#   Windows:  winget install Gyan.FFmpeg     (then restart the terminal)
