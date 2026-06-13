@@ -17,6 +17,10 @@ prompts/*_candidates/
 assets/images/
 assets/cutaways/
 assets/music/
+
+# Imported audio is user-supplied / loudnorm'd at build time (keep the folder)
+assets/sfx/imported/*
+!assets/sfx/imported/.gitkeep
 refs/*.png
 refs/*.jpg
 refs/*.jpeg
