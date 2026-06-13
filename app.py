@@ -201,7 +201,7 @@ def load_stills_tab(name: str):
 def load_animate_tab(name: str):
     if not name:
         return (gr.update(choices=[], value=[]), gr.update(choices=[]),
-                None, "")
+                None, "", gr.update(choices=[]))
     ep = st.Episode(name)
     clips = ep.clips()
     names = [c["name"] for c in clips]
@@ -213,7 +213,7 @@ def load_animate_tab(name: str):
            f"Batch ≈ {len(marked)}×{dur}s of Veo output.")
     return (gr.update(choices=names, value=marked),
             gr.update(choices=names, value=(marked[0] if marked else None)),
-            None, msg)
+            None, msg, gr.update(choices=names))
 
 
 def load_handoff_tab(name: str):
@@ -474,6 +474,34 @@ def test_one_clip(name: str, scene: str, force: bool):
     yield f"{scene}: {r.status} ({r.seconds or '?'}s render).", str(ep.clips_dir / f"{scene}.mp4")
 
 
+def use_own_clip(name: str, scene: str, file: str | None):
+    """Install a user-supplied .mp4 as the scene's clip. From here on the
+    pipeline treats it exactly like a Veo render: the batch skips it (never
+    billed) and the handoff places it as NN.mp4 instead of the still."""
+    ep = _require(name, "prompts", "generate prompts first")
+    if not scene:
+        raise gr.Error("Pick the scene this clip replaces.")
+    if not file:
+        raise gr.Error("Choose an .mp4 file first.")
+    src = Path(file)
+    if src.suffix.lower() != ".mp4":
+        raise gr.Error("Only .mp4 files — the build step keys on NN.mp4 "
+                       "filenames in assets/images.")
+    import shutil
+    ep.clips_dir.mkdir(parents=True, exist_ok=True)
+    dest = ep.clips_dir / f"{scene}.mp4"
+    shutil.copy2(src, dest)
+    manifest = ep.load_manifest()
+    for c in manifest["clips"]:
+        if c["name"] == scene:
+            c["animate"] = True
+    ep.save_manifest(manifest)
+    cbg_u, _, _, info, own_u = load_animate_tab(name)
+    return (f"{scene}: your clip is installed as {dest.name} — marked animate; "
+            "Veo will skip it (rendered clips are never re-billed).",
+            str(dest), cbg_u, info, own_u, status_banner(name))
+
+
 def run_animate_batch(name: str, selected: list[str], confirmed: bool, force: bool):
     ep = _require(name, "stills", "generate all stills first")
     _check_stills_approved(ep)
@@ -620,6 +648,155 @@ def save_keys(gemini: str, eleven: str):
     return _key_status(), "", ""
 
 
+# ----------------------------------------------------------------- SFX panel
+
+def _sfx_sources() -> list[str]:
+    """All referenceable cue tags: library + imported, from the tag map."""
+    from orchestrator.audio_spec import load_sfx_map
+    return sorted(load_sfx_map().keys())
+
+
+def sfx_summary(name: str) -> str:
+    """A human-readable list of the episode's current cues (manifest-backed)."""
+    from orchestrator.audio_spec import parse_audio_spec, AudioSpecError
+    if not name:
+        return "_Pick an episode first._"
+    ep = _ep(name)
+    manifest = ep.load_manifest() or {}
+    try:
+        spec = parse_audio_spec(manifest)
+    except AudioSpecError as exc:
+        return f"⚠ **Spec has problems:**\n\n```\n{exc}\n```"
+    if spec.is_empty():
+        return ("_No SFX yet._ Upload an mp3 or pick a library tag, choose a "
+                "layer, and **Add cue**. The VO never speaks a cue — cues live "
+                "in the manifest's `audio`/`sfx` blocks, never in the script.")
+    rows = ["| layer | source | placement | gain | extras |",
+            "|---|---|---|---|---|"]
+
+    def _anchor_str(c) -> str:
+        a = c.anchor or {}
+        if "word" in a:
+            return f"word “{a['word']}” +{a.get('offset', 0)}s"
+        if "scene" in a:
+            return f"scene {a['scene']} +{a.get('offset', 0)}s"
+        if "time" in a:
+            return f"@{a['time']}s"
+        return "whole video"
+
+    for c in spec.all_cues():
+        extras = []
+        if c.pan is not None:
+            extras.append(f"pan {c.pan:+.1f}")
+        if c.fade_in:
+            extras.append(f"fade-in {c.fade_in}s")
+        if c.fade_out:
+            extras.append(f"fade-out {c.fade_out}s")
+        if c.loop:
+            extras.append("loop")
+        rows.append(f"| {c.layer} | `{c.source}` | {_anchor_str(c)} | "
+                    f"{c.gain_db:+.0f} dB | {', '.join(extras) or '—'} |")
+    duck = ("on" if spec.duck_enabled else "off")
+    return "\n".join(rows) + f"\n\n**Ducking:** {duck} (SFX dip under the VO)."
+
+
+def import_sfx(files) -> tuple:
+    """Import + loudnorm uploaded audio; register and refresh the source list."""
+    if not files:
+        raise gr.Error("Choose one or more audio files to import.")
+    paths = [f.name if hasattr(f, "name") else f for f in files]
+    try:
+        from orchestrator.audio_import import import_many
+        tags = import_many(paths)
+    except Exception as exc:
+        raise gr.Error(f"Import failed: {exc}", duration=None)
+    srcs = _sfx_sources()
+    return (f"✅ Imported & normalized: {', '.join(tags)}. "
+            f"They're now in the source list.",
+            gr.update(choices=srcs, value=tags[0]))
+
+
+def add_sfx_cue(name: str, source: str, layer: str, host_scene: float,
+                anchor_type: str, word: str, time_s: float, offset: float,
+                gain_db: float, pan: float, fade_in: float, fade_out: float,
+                loop: bool, ducking: bool):
+    """Append a cue to the manifest, validating before save (no silent fails)."""
+    from orchestrator.audio_spec import parse_audio_spec, AudioSpecError
+    if not name:
+        raise gr.Error("Pick an episode first.")
+    if not source:
+        raise gr.Error("Pick a cue source (a library tag or an imported track).")
+    ep = _ep(name)
+    manifest = ep.load_manifest()
+    if not manifest:
+        raise gr.Error("Generate prompts first — SFX attach to the manifest.")
+
+    cue: dict = {"source": source, "gain_db": round(float(gain_db), 1)}
+    if abs(float(pan)) > 1e-6:
+        cue["pan"] = round(float(pan), 2)
+    if float(fade_in) > 0:
+        cue["fade_in"] = round(float(fade_in), 2)
+    if float(fade_out) > 0:
+        cue["fade_out"] = round(float(fade_out), 2)
+
+    host = int(host_scene or 1)
+    if layer in ("ambient_bed", "music_bed"):
+        cue["loop"] = bool(loop) if loop is not None else True
+        manifest.setdefault("audio", {})[layer] = cue
+    else:
+        if bool(loop):
+            cue["loop"] = True
+        if anchor_type == "word":
+            if not (word or "").strip():
+                raise gr.Error("Enter the word to anchor the cue to.")
+            cue["at"] = {"word": word.strip(), "offset": round(float(offset), 2)}
+        elif anchor_type == "time":
+            cue["at"] = {"time": round(float(time_s), 2)}
+        else:  # scene
+            cue["at"] = {"scene": host, "offset": round(float(offset), 2)}
+        if layer == "motif":
+            manifest.setdefault("audio", {}).setdefault("motifs", []).append(cue)
+        else:  # oneshot → lives under its host clip
+            clips = manifest.get("clips", [])
+            if host < 1 or host > len(clips):
+                raise gr.Error(f"Host scene {host} is out of range "
+                               f"(1..{len(clips)}).")
+            clips[host - 1].setdefault("sfx", []).append(cue)
+
+    manifest.setdefault("audio", {}).setdefault("ducking", {})["enabled"] = \
+        bool(ducking)
+
+    # Validate the WHOLE spec before persisting — reject bad additions loudly.
+    try:
+        parse_audio_spec(manifest)
+    except AudioSpecError as exc:
+        raise gr.Error(f"Cue rejected:\n{exc}", duration=None)
+    ep.save_manifest(manifest)
+    return f"✅ Added {layer} cue `{source}`.", sfx_summary(name)
+
+
+def clear_sfx(name: str):
+    """Strip all SFX from the manifest (audio block + per-clip sfx)."""
+    if not name:
+        raise gr.Error("Pick an episode first.")
+    ep = _ep(name)
+    manifest = ep.load_manifest()
+    if not manifest:
+        return "_Nothing to clear._", sfx_summary(name)
+    manifest.pop("audio", None)
+    for c in manifest.get("clips", []):
+        c.pop("sfx", None)
+    ep.save_manifest(manifest)
+    return "🧹 Cleared all SFX for this episode.", sfx_summary(name)
+
+
+def load_sfx_tab(name: str):
+    """Populate the source dropdown + cue summary on episode load."""
+    srcs = _sfx_sources()
+    return gr.update(choices=srcs, value=(srcs[0] if srcs else None)), \
+        sfx_summary(name)
+
+
 # ------------------------------------------------------------------ UI -----
 
 def build_app() -> gr.Blocks:
@@ -735,7 +912,9 @@ def build_app() -> gr.Blocks:
                             "are never re-billed.")
                 animate_cbg = gr.CheckboxGroup(choices=[],
                                                label="Scenes to animate")
-                save_sel_btn = gr.Button("💾 Save selection")
+                with gr.Row():
+                    save_sel_btn = gr.Button("💾 Save selection")
+                    refresh_anim_btn = gr.Button("🔄 Refresh from disk")
                 animate_info = gr.Markdown("")
                 gr.Markdown("**Test one clip first:**")
                 with gr.Row():
@@ -745,6 +924,14 @@ def build_app() -> gr.Blocks:
                     test_btn = gr.Button("🎬 Render test clip (💰 1 clip)",
                                          variant="primary")
                 clip_preview = gr.Video(label="Clip preview", height=420)
+                gr.Markdown("**Or bring your own clip** — replaces the still "
+                            "for that scene with your .mp4 (no Veo, never "
+                            "billed). Use 9:16 to match the build.")
+                with gr.Row():
+                    own_scene_dd = gr.Dropdown(choices=[], label="Scene")
+                    own_clip_file = gr.File(label="Your .mp4",
+                                            file_types=[".mp4"])
+                    own_clip_btn = gr.Button("📥 Use this clip for the scene")
                 gr.Markdown("**Then the batch:**")
                 with gr.Row():
                     batch_confirm_cb = gr.Checkbox(
@@ -791,6 +978,53 @@ def build_app() -> gr.Blocks:
                                                           "settings changed)")
                     assemble_btn = gr.Button("🎙 Build the video",
                                              variant="primary")
+
+                with gr.Accordion("🔊 Sound effects & custom audio (optional)",
+                                  open=False):
+                    gr.Markdown(
+                        "Layer sound on top of the narration. Cues live in the "
+                        "manifest's `audio`/`sfx` blocks — **never in the script**, "
+                        "so the voice can't speak a cue tag. The Build button "
+                        "above picks these up automatically.")
+                    with gr.Row():
+                        sfx_upload = gr.File(label="Import your own audio "
+                                             "(mp3/wav…) — loudnorm'd on import",
+                                             file_count="multiple",
+                                             file_types=["audio"])
+                        sfx_import_btn = gr.Button("⬇ Import & normalize")
+                    with gr.Row():
+                        sfx_source_dd = gr.Dropdown(choices=[], label="Cue source "
+                                                    "(library tag or imported)")
+                        sfx_layer_dd = gr.Dropdown(
+                            choices=["ambient_bed", "music_bed", "motif",
+                                     "oneshot"], value="oneshot", label="Layer")
+                        sfx_scene_n = gr.Number(value=1, precision=0,
+                                                label="Host scene # (one-shot / "
+                                                      "scene anchor)")
+                    with gr.Row():
+                        sfx_anchor_rb = gr.Radio(
+                            choices=["scene", "word", "time"], value="scene",
+                            label="Anchor (ignored for beds)")
+                        sfx_word_tb = gr.Textbox(label="…on word", value="")
+                        sfx_time_n = gr.Number(value=0.0, label="…at time (s)")
+                        sfx_offset_n = gr.Number(value=0.0,
+                                                 label="offset (s, scene/word)")
+                    with gr.Row():
+                        sfx_gain_sl = gr.Slider(-40, 6, value=-12, step=1,
+                                                label="Gain (dB)")
+                        sfx_pan_sl = gr.Slider(-1, 1, value=0, step=0.1,
+                                               label="Pan (L–R)")
+                        sfx_fadein_n = gr.Number(value=0.0, label="Fade in (s)")
+                        sfx_fadeout_n = gr.Number(value=0.0, label="Fade out (s)")
+                    with gr.Row():
+                        sfx_loop_cb = gr.Checkbox(label="Loop", value=False)
+                        sfx_duck_cb = gr.Checkbox(
+                            label="Duck SFX under VO (sidechain)", value=True)
+                        sfx_add_btn = gr.Button("➕ Add cue", variant="primary")
+                        sfx_clear_btn = gr.Button("🧹 Clear all SFX")
+                    sfx_msg = gr.Markdown("")
+                    sfx_summary_md = gr.Markdown("")
+
                 assemble_status = gr.Textbox(label="Progress", lines=8,
                                              interactive=False)
                 assemble_video = gr.Video(label="Result", height=480)
@@ -846,11 +1080,13 @@ def build_app() -> gr.Blocks:
                                      [stills_gallery, regen_dd, stills_msg])
         load_chain = load_chain.then(load_animate_tab, ep_state,
                                      [animate_cbg, test_dd, clip_preview,
-                                      animate_info])
+                                      animate_info, own_scene_dd])
         load_chain = load_chain.then(load_handoff_tab, ep_state, handoff_md)
         load_chain = load_chain.then(load_assemble_tab, ep_state,
                                      [voice_id_tb, stab_sl, sim_sl, style_sl,
                                       music_dd, assemble_status])
+        load_chain = load_chain.then(load_sfx_tab, ep_state,
+                                     [sfx_source_dd, sfx_summary_md])
         load_chain.then(load_qc_tab, ep_state,
                         [qc_video, qc_md, qc_gallery, title_tb, desc_tb,
                          approve_md])
@@ -879,7 +1115,8 @@ def build_app() -> gr.Blocks:
             (evt.then(load_stills_tab, ep_state,
                       [stills_gallery, regen_dd, stills_msg])
                 .then(load_animate_tab, ep_state,
-                      [animate_cbg, test_dd, clip_preview, animate_info])
+                      [animate_cbg, test_dd, clip_preview, animate_info,
+                       own_scene_dd])
                 .then(load_handoff_tab, ep_state, handoff_md))
 
         _chain_scene_refresh(
@@ -897,12 +1134,26 @@ def build_app() -> gr.Blocks:
         approve_stills_btn.click(approve_stills, ep_state,
                                  [stills_msg, banner]) \
             .then(load_animate_tab, ep_state,
-                  [animate_cbg, test_dd, clip_preview, animate_info])
+                  [animate_cbg, test_dd, clip_preview, animate_info,
+                   own_scene_dd])
 
         save_sel_btn.click(save_animate_selection, [ep_state, animate_cbg],
                            [animate_info, banner])
+        # Re-read the manifest and on-disk stills/clips so files edited
+        # outside the GUI show up without a page reload.
+        refresh_anim_btn.click(load_animate_tab, ep_state,
+                               [animate_cbg, test_dd, clip_preview,
+                                animate_info, own_scene_dd]) \
+            .then(load_stills_tab, ep_state,
+                  [stills_gallery, regen_dd, stills_msg]) \
+            .then(load_handoff_tab, ep_state, handoff_md)
         test_btn.click(test_one_clip, [ep_state, test_dd, test_force_cb],
                        [animate_status, clip_preview])
+        own_clip_btn.click(use_own_clip,
+                           [ep_state, own_scene_dd, own_clip_file],
+                           [animate_status, clip_preview, animate_cbg,
+                            animate_info, own_scene_dd, banner]) \
+            .then(load_handoff_tab, ep_state, handoff_md)
         batch_btn.click(run_animate_batch,
                         [ep_state, animate_cbg, batch_confirm_cb,
                          batch_force_cb],
@@ -917,6 +1168,15 @@ def build_app() -> gr.Blocks:
 
         fetch_voices_btn.click(fetch_voices, None, [voices_dd, assemble_status])
         voices_dd.change(voice_picked, voices_dd, voice_id_tb)
+
+        sfx_import_btn.click(import_sfx, sfx_upload, [sfx_msg, sfx_source_dd])
+        sfx_add_btn.click(
+            add_sfx_cue,
+            [ep_state, sfx_source_dd, sfx_layer_dd, sfx_scene_n, sfx_anchor_rb,
+             sfx_word_tb, sfx_time_n, sfx_offset_n, sfx_gain_sl, sfx_pan_sl,
+             sfx_fadein_n, sfx_fadeout_n, sfx_loop_cb, sfx_duck_cb],
+            [sfx_msg, sfx_summary_md])
+        sfx_clear_btn.click(clear_sfx, ep_state, [sfx_msg, sfx_summary_md])
         assemble_btn.click(run_assemble,
                            [ep_state, voice_id_tb, stab_sl, sim_sl, style_sl,
                             music_dd, assemble_force_cb],
