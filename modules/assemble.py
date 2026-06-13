@@ -258,7 +258,8 @@ def _build_narration_audio(voice: Path, cutaways: list[dict], work: Path) -> Pat
 def assemble(scenes: list[Scene], voice_wav: Path, ass_file: Path,
              out_path: Path, music: Path | None = None,
              voice_duration: float | None = None,
-             cutaways: list[dict] | None = None) -> list[str]:
+             cutaways: list[dict] | None = None,
+             audio_spec=None, words=None) -> list[str]:
     work = config.WORK_DIR
 
     durations = [s.duration for s in scenes]
@@ -288,7 +289,24 @@ def assemble(scenes: list[Scene], voice_wav: Path, ass_file: Path,
     narration = _build_narration_audio(voice_wav, cutaways or [], work)
     total = (voice_duration or 0.0) + sum(c["duration"] for c in (cutaways or []))
     mixed = work / "_audio.m4a"
-    _mix_audio(narration, music, mixed, total or voice_duration)
+
+    if audio_spec is not None and not audio_spec.is_empty():
+        # Multi-layer SFX path: place cues against the post-cutaway scene
+        # timeline and the narration's word timings, then duck/mix in one graph.
+        import math
+        from modules import audio_mix
+        scene_timeline, t = [], 0.0
+        for sc in scenes:
+            scene_timeline.append({"file": sc.image.name, "start": t,
+                                   "duration": sc.duration})
+            t += sc.duration
+        music_db = 20.0 * math.log10(max(1e-4, config.MUSIC_VOLUME))
+        audio_mix.mix_with_spec(
+            narration, mixed, audio_spec, scene_timeline, words or [],
+            total or voice_duration or t,
+            legacy_music=music, legacy_music_gain_db=music_db)
+    else:
+        _mix_audio(narration, music, mixed, total or voice_duration)
 
     _burn_and_mux(silent, mixed, ass_file, out_path)
     return notes

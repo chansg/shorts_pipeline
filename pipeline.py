@@ -214,8 +214,21 @@ def run(seed_path: str, music: str | None = None, no_rewrite: bool = False):
             log.add("Music:    none")
             if music_path:
                 log.warn(f"Music file not found: {music_path}")
+        # Optional SFX/audio layer from manifests/<name>.json (if one exists).
+        audio_spec = None
+        manifest_path = config.ROOT / "manifests" / f"{name}.json"
+        if manifest_path.exists():
+            import json as _json
+            from orchestrator.audio_spec import parse_audio_spec
+            manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+            audio_spec = parse_audio_spec(manifest)
+            if not audio_spec.is_empty():
+                log.add(f"SFX:      {len(audio_spec.all_cues())} cue(s) mixed "
+                        f"(ducking {'on' if audio_spec.duck_enabled else 'off'})")
+
         render_notes = asm_mod.assemble(scenes, voice, ass, out, music_path,
-                                        voice_duration=duration, cutaways=cutaways)
+                                        voice_duration=duration, cutaways=cutaways,
+                                        audio_spec=audio_spec, words=aligned)
 
         log.add("")
         log.add("Scene render (image=still+KenBurns, video=Higgsfield clip):")

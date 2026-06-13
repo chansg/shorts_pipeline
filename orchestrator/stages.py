@@ -192,12 +192,21 @@ def voice_assemble(ep: st.Episode, music_path: Path | None,
             yield {"msg": f"Note: {len(images)} media files for {n_sent} "
                           "sentences — scenes will cover multiple sentences."}
 
+        # Parse the optional SFX/audio layer from the manifest (clear errors if
+        # malformed). Absent audio data -> empty spec -> legacy mix path.
+        from orchestrator.audio_spec import parse_audio_spec
+        audio_spec = parse_audio_spec(ep.load_manifest() or {})
+        if not audio_spec.is_empty():
+            yield {"msg": f"SFX layer: {len(audio_spec.all_cues())} cue(s) "
+                          f"(ambient/motif/one-shot) will be mixed in."}
+
         yield {"msg": f"Assembling {len(scenes)} scenes (Ken Burns + clips, "
                       f"{config.TRANSITION_SEC}s crossfades)... this is the "
                       "long ffmpeg step."}
         music = music_path if music_path and Path(music_path).exists() else None
         notes = asm_mod.assemble(scenes, voice_wav, ass, ep.output_path, music,
-                                 voice_duration=duration)
+                                 voice_duration=duration,
+                                 audio_spec=audio_spec, words=aligned)
 
         timeline, t = [], 0.0
         for sc in scenes:
