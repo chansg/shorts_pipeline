@@ -73,7 +73,27 @@ class RunLog:
         path.write_text("\n".join(body), encoding="utf-8")
 
 
-def run(seed_path: str, music: str | None = None, no_rewrite: bool = False):
+def _attach_imported(spec, tag: str, layer: str) -> None:
+    """Attach an imported track to a layer for this build (no manifest edit).
+    Beds span the whole video; motif/one-shot land at the start (time 0)."""
+    from orchestrator.audio_spec import Cue, load_sfx_map, resolve_source
+    path = resolve_source(tag, load_sfx_map())
+    if layer in ("ambient_bed", "music_bed"):
+        cue = Cue(source=tag, path=path, layer=layer, label=f"cli:{tag}",
+                  gain_db=-16.0, loop=True, fade_in=1.5, fade_out=2.0)
+        setattr(spec, layer, cue)
+    elif layer == "motif":
+        spec.motifs.append(Cue(source=tag, path=path, layer="motif",
+                               label=f"cli:{tag}", gain_db=-12.0,
+                               anchor={"time": 0.0}))
+    else:  # oneshot
+        spec.oneshots.append(Cue(source=tag, path=path, layer="oneshot",
+                                 label=f"cli:{tag}", gain_db=-8.0,
+                                 anchor={"time": 0.0}))
+
+
+def run(seed_path: str, music: str | None = None, no_rewrite: bool = False,
+        sfx_import: list[str] | None = None, sfx_as: str | None = None):
     seed_path = Path(seed_path)
     name = seed_path.stem
     work = config.WORK_DIR
@@ -81,6 +101,14 @@ def run(seed_path: str, music: str | None = None, no_rewrite: bool = False):
     log_path = config.OUTPUT_DIR / f"{name}_log.txt"
 
     try:
+        imported_tags: list[str] = []
+        if sfx_import:
+            print(f"0/5  Importing {len(sfx_import)} audio file(s) (loudnorm)...")
+            from orchestrator.audio_import import import_many
+            imported_tags = import_many(sfx_import)
+            print(f"     Registered: {', '.join(imported_tags)}")
+            log.add(f"Imported: {', '.join(imported_tags)}")
+
         print("1/5  Rewriting script...")
         seed = script_mod.load_seed(seed_path)
         if no_rewrite or config.REWRITE_BACKEND == "none":
@@ -214,17 +242,22 @@ def run(seed_path: str, music: str | None = None, no_rewrite: bool = False):
             log.add("Music:    none")
             if music_path:
                 log.warn(f"Music file not found: {music_path}")
-        # Optional SFX/audio layer from manifests/<name>.json (if one exists).
-        audio_spec = None
+        # Optional SFX/audio layer from manifests/<name>.json (if one exists),
+        # plus any imported track attached via --sfx-as for this build.
+        import json as _json
+        from orchestrator.audio_spec import parse_audio_spec, AudioSpec
         manifest_path = config.ROOT / "manifests" / f"{name}.json"
         if manifest_path.exists():
-            import json as _json
-            from orchestrator.audio_spec import parse_audio_spec
             manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
             audio_spec = parse_audio_spec(manifest)
-            if not audio_spec.is_empty():
-                log.add(f"SFX:      {len(audio_spec.all_cues())} cue(s) mixed "
-                        f"(ducking {'on' if audio_spec.duck_enabled else 'off'})")
+        else:
+            audio_spec = AudioSpec()
+        if imported_tags and sfx_as:
+            _attach_imported(audio_spec, imported_tags[0], sfx_as)
+            log.add(f"SFX:      imported '{imported_tags[0]}' as {sfx_as}")
+        if not audio_spec.is_empty():
+            log.add(f"SFX:      {len(audio_spec.all_cues())} cue(s) mixed "
+                    f"(ducking {'on' if audio_spec.duck_enabled else 'off'})")
 
         render_notes = asm_mod.assemble(scenes, voice, ass, out, music_path,
                                         voice_duration=duration, cutaways=cutaways,
@@ -267,5 +300,13 @@ if __name__ == "__main__":
     ap.add_argument("--music", help="background music file", default=None)
     ap.add_argument("--no-rewrite", action="store_true",
                     help="narrate the script verbatim (skip the rewrite step)")
+    ap.add_argument("--sfx-import", nargs="+", metavar="MP3", default=None,
+                    help="import + loudnorm one or more audio files, register as "
+                         "reusable cue tags")
+    ap.add_argument("--sfx-as", choices=["ambient_bed", "music_bed", "motif",
+                    "oneshot"], default=None,
+                    help="attach the first imported track to this layer for the "
+                         "build (beds span the whole video)")
     args = ap.parse_args()
-    run(args.seed, args.music, args.no_rewrite)
+    run(args.seed, args.music, args.no_rewrite,
+        sfx_import=args.sfx_import, sfx_as=args.sfx_as)
