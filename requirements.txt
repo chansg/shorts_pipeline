@@ -1,7 +1,15 @@
+# ===== Unified requirements: shorts_pipeline + i2v + GUI =====
+
 # Core
 python-dotenv
 numpy
-pillow
+pillow>=10.0.0
+
+# GUI (python app.py)
+gradio>=5.0
+
+# Image gen (Nano Banana 2) + Veo image-to-video — needs GEMINI_API_KEY in .env
+google-genai>=1.0.0
 
 # Voiceover — ElevenLabs only (needs ELEVENLABS_API_KEY in .env)
 elevenlabs

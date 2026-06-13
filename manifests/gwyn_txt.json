@@ -1,0 +1,104 @@
+{
+  "defaults": {
+    "image_model": "gemini-3.1-flash-image",
+    "image_aspect_ratio": "9:16",
+    "aspect_ratio": "9:16",
+    "duration_seconds": 4,
+    "negative_prompt": "text, watermark, logo, distorted anatomy, morphing, warping limbs, flickering geometry, extra limbs",
+    "style_suffix": "Vertical 9:16 composition, cinematic framing, no text, no watermark, keep the lower third darker and uncluttered for subtitles."
+  },
+  "style_refs": [
+    "refs\\style_dark_fantasy.png"
+  ],
+  "characters": {
+    "gwyn": [
+      "refs\\gwynref.png"
+    ]
+  },
+  "clips": [
+    {
+      "image": "01.png",
+      "name": "01_a_vast_primordial_landsc",
+      "narrates": "Before fire, the world existed in endless grey, ruled by immortal dragons beneath stone arch trees.",
+      "refs": [],
+      "prompt": "A vast, primordial landscape under a sky of uniform grey. Colossal stone trees arc high into the dim expanse, their immense trunks and branches forming natural bridges and shelters. Ancient, scaled dragons with stony hides rest motionless on the highest natural platforms or drift slowly through the heavy air between the arches.",
+      "motion_prompt": "Subtle cinematic motion. Slow, steady camera push-in. Gentle atmospheric movement such as drifting particles and soft haze. The subject stays stable; do not distort faces, bodies, or objects. Calm, no fast motion.",
+      "animate": false
+    },
+    {
+      "image": "02.png",
+      "name": "02_a_profound_chasm_opens_i",
+      "narrates": "When the First Flame appeared, Gwyn discovered a powerful Lord Soul and claimed its strength as his own.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "A profound chasm opens into a vast cavern. From its deepest point, a radiant, primal flame erupts upward, casting brilliant, dynamic light across the stone formations. Gwyn stands before this immense light source, one arm extended towards its powerful energy, his form illuminated by its intense glow.",
+      "motion_prompt": "A slow, upward camera push as the radiant flame bursts forth from the chasm's depths, expanding its light rapidly. Then, a steady, deliberate pull-back reveals Gwyn stepping into the expanding light.",
+      "animate": false
+    },
+    {
+      "image": "03.png",
+      "name": "03_gwyn_central_and_formida",
+      "narrates": "Wielding devastating sunlight lightning, he led the gods in a war that brought the Age of Ancients to an end.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "Gwyn, central and formidable, unleashes immense bolts of crackling sunlight energy from his outstretched hand, striking colossal, scaled dragons amidst a landscape of shattered stone trees. Other figures, his allies, are engaged in direct conflict with the ancient creatures. Bright, explosive flashes illuminate the turbulent scene, casting deep, rapid-shifting shadows.",
+      "motion_prompt": "A sweeping camera movement follows Gwyn's powerful action as bolts of energy arc across the battlefield. The view then subtly zooms out, revealing the scale of the conflict unfolding.",
+      "animate": false
+    },
+    {
+      "image": "04.png",
+      "name": "04_gwyn_stands_on_a_high_or",
+      "narrates": "With the dragons defeated, Gwyn established the glorious kingdom of Anor Londo and began the Age of Fire.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "Gwyn stands on a high, ornate terrace, overlooking the immense, glorious city of Anor Londo. Grand spires and majestic arches rise into a clear, bright sky. The entire kingdom is bathed in a pervasive, golden light, emanating a profound sense of establishment and peace.",
+      "motion_prompt": "Subtle cinematic motion. Slow, steady camera push-in. Gentle atmospheric movement such as drifting particles and soft haze. The subject stays stable; do not distort faces, bodies, or objects. Calm, no fast motion.",
+      "animate": false
+    },
+    {
+      "image": "05.png",
+      "name": "05_the_grand_city_of_anor_l",
+      "narrates": "For centuries he ruled as the Lord of Sunlight, but the First Flame eventually began to fade.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "The grand city of Anor Londo is visible, but the once vibrant golden light now appears significantly muted and weak. Deepening shadows lengthen across its majestic architecture. Gwyn stands observing the changing light, his posture conveying a profound sense of contemplation as the pervasive brilliance diminishes around him.",
+      "motion_prompt": "Subtle cinematic motion. Slow, steady camera push-in. Gentle atmospheric movement such as drifting particles and soft haze. The subject stays stable; do not distort faces, bodies, or objects. Calm, no fast motion.",
+      "animate": false
+    },
+    {
+      "image": "06.png",
+      "name": "06_gwyn_resolute_and_purpos",
+      "narrates": "Fearing the rise of the Age of Dark and humanity's unknown future, Gwyn chose to sacrifice himself to the dying flame.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "Gwyn, resolute and purposeful, walks towards a much diminished, flickering First Flame, which emanates a struggling light within a vast, shadowed chamber. He steps directly into the core of the fading luminosity, his form becoming infused with its remaining power. Intense, yet weakening, light pulses outward from the contact.",
+      "motion_prompt": "A slow, deliberate push-in follows Gwyn's movement towards the flame. As he merges, the camera pulls back slightly and upward, showing the light from the flame expanding in a final, powerful pulse.",
+      "animate": false
+    },
+    {
+      "image": "07.png",
+      "name": "07_a_vast_desolate_landscap",
+      "narrates": "His sacrifice prolonged the Age of Fire, but it also created an endless cycle that doomed countless souls.",
+      "refs": [],
+      "prompt": "A vast, desolate landscape extends under a perpetually oppressive twilight sky. Indistinct, spectral figures drift or walk in an unending, repetitive procession across the barren plains and through ancient, eroded structures, caught in an eternal cycle under the heavy, dim light.",
+      "motion_prompt": "Subtle cinematic motion. Slow, steady camera push-in. Gentle atmospheric movement such as drifting particles and soft haze. The subject stays stable; do not distort faces, bodies, or objects. Calm, no fast motion.",
+      "animate": false
+    },
+    {
+      "image": "08.png",
+      "name": "08_gwyn_sits_motionless_ami",
+      "narrates": "By the time you arrive in Lordran, Gwyn is no longer a godly king, but a hollowed husk waiting at the heart of the fading world.",
+      "refs": [
+        "gwyn"
+      ],
+      "prompt": "Gwyn sits motionless amidst the remnants of a great chamber, his form skeletal and decrepit, devoid of former glory. The surrounding architecture is profoundly decayed and cold. Extremely dim, stagnant light barely pierces the heavy shadows, illuminating his still figure as he waits at the silent, fading core of the world.",
+      "motion_prompt": "Subtle cinematic motion. Slow, steady camera push-in. Gentle atmospheric movement such as drifting particles and soft haze. The subject stays stable; do not distort faces, bodies, or objects. Calm, no fast motion.",
+      "animate": false
+    }
+  ]
+}

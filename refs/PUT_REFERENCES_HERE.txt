@@ -1,0 +1,4 @@
+Drop your reference PNGs here, named to match manus_prompts.json:
+  style_dark_fantasy.png   -> global style lock (applied to every scene)
+  manus_ref.png            -> Manus character reference (scene 02)
+See ../REFERENCE_IMAGES.md for the full workflow.

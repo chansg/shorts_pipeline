@@ -24,3 +24,4 @@ refs/*.webp
 
 # Scratch
 _aria_extract/
+manifests/*.state.json
