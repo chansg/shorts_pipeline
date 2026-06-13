@@ -112,16 +112,119 @@ scenes that feature them.
 
 ---
 
+## Sound effects & custom audio
+
+The manifest carries an **optional** audio layer, separate from the narration.
+A manifest with no `audio` key and no per-clip `sfx` key builds exactly as
+before — this is fully backward compatible. **Cue tags live only in these
+blocks, never in the script**, so the voiceover can physically never speak a
+cue marker.
+
+### The two commands you need
+
+```
+python app.py                              # local UI: import mp3, attach SFX, Build
+python pipeline.py scripts/NAME.txt        # headless build (reads manifests/NAME.json)
+```
+
+In the UI, open **7 · Voice & Build → 🔊 Sound effects & custom audio**: upload
+an mp3, pick a source + layer, set timing/gain, **Add cue**, then **Build**.
+Everything is written into the manifest, so the headless build uses the same
+cues.
+
+### Three layers
+
+| layer | what it is | placement |
+|-------|------------|-----------|
+| `ambient_bed` | one continuous track for the whole video | from 0, loops |
+| `music_bed`   | a second continuous bed (e.g. an imported song) | from 0, loops |
+| `motif`       | a recurring/loopable cue, placed one or more times | anchored |
+| one-shots     | discrete cues under a clip's `sfx[]` array | anchored |
+
+Every cue supports: `source`, `gain_db`, optional `pan` (-1..1), `fade_in`,
+`fade_out`, `loop`, and an `at` anchor (not needed for beds).
+
+### Anchors — `at`
+
+```jsonc
+{"scene": 2, "offset": 0.5}                 // 0.5s into scene 2
+{"word": "knocking", "occurrence": 1, "offset": 0}  // on a spoken word
+{"time": 4.2}                               // absolute seconds from the start
+```
+
+Word anchors reuse the Whisper word timings the build already computes — land a
+knock exactly on the word "knocking".
+
+### `source` — tags, not paths
+
+A cue's `source` is a **library tag** (resolved via `assets/sfx/sfx_map.json`),
+an `@import/<name>` alias for an imported track, or a raw path (escape hatch).
+Bundled tags: `knock_wood`, `wind_hall`, `rot_shimmer`, `boom_low`.
+
+### Example manifest with SFX
+
+```jsonc
+{
+  "defaults": { /* … unchanged … */ },
+  "audio": {
+    "ambient_bed": { "source": "wind_hall", "gain_db": -22,
+                     "loop": true, "fade_in": 2.0, "fade_out": 3.0 },
+    "motifs": [
+      { "source": "rot_shimmer", "at": { "scene": 6, "offset": 0.0 },
+        "gain_db": -14, "pan": -0.3, "fade_in": 0.5, "loop": true }
+    ],
+    "ducking": { "enabled": true, "amount_db": 8, "threshold": 0.05 }
+  },
+  "clips": [
+    { "image": "01.png", "name": "01_…", "narrates": "Something is knocking.",
+      "sfx": [
+        { "source": "knock_wood", "at": { "word": "knocking" },
+          "gain_db": -6, "pan": 0.2, "fade_out": 0.3 }
+      ] }
+  ]
+}
+```
+
+### Import your own mp3
+
+```
+python pipeline.py scripts/NAME.txt --sfx-import song.mp3 --sfx-as music_bed
+python pipeline.py scripts/NAME.txt --sfx-import knock.mp3 thud.mp3   # just register tags
+```
+
+Import runs ffmpeg **`loudnorm`** (I=-16 / TP=-1.5 / LRA=11) so levels are sane,
+copies the result into `assets/sfx/imported/`, and registers it so it's usable
+as a bare tag or `@import/<name>` on any layer. The UI's **Import & normalize**
+button does the same.
+
+### Mixing
+
+All layers render in a single ffmpeg `filter_complex`: `adelay` + `volume` +
+`pan` + `afade` per cue → `amix=normalize=0` (no auto-normalization that would
+wreck levels) → optional `sidechaincompress` so SFX dip under the voice when
+they overlap → muxed onto the video. Cue ordering is stable, so the same
+manifest always produces the same mix.
+
+### Validation
+
+Bad audio data fails **loudly** with every problem listed at once (unknown
+tags, out-of-range scenes, missing anchor words, bad pan/gain) — both in the UI
+and the headless build. There is no silent fallthrough.
+
+---
+
 ## CLI reference (everything still works without the GUI)
 
 ```
 python pipeline.py scripts/NAME.txt [--no-rewrite] [--music PATH]
+python pipeline.py scripts/NAME.txt --sfx-import a.mp3 --sfx-as music_bed
 python prompt_gen.py scripts/NAME.txt [--style dark_fantasy|folklore_horror]
 python -m i2v.cli --manifest manifests/NAME.json --images episodes/NAME/stills \
                   --out episodes/NAME/clips [--only scene ...] [--dry-run]
 python -m i2v.imagegen --manifest manifests/NAME.json \
                   --images episodes/NAME/stills --refs refs
 python -m modules.tts voices        # list ElevenLabs voice IDs
+python -m pytest tests/ -q          # timeline parse/validation + SFX timing tests
 ```
 
 Key pipeline behaviours (unchanged):

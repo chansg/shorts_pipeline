@@ -17,6 +17,9 @@ elevenlabs
 # Captions
 faster-whisper
 
+# Tests (pytest tests/)
+pytest
+
 # Optional rewrite backend (REWRITE_BACKEND="claude" in config.py)
 anthropic
 # REWRITE_BACKEND="ollama" uses a local Ollama service (no pip package)
