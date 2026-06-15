@@ -70,7 +70,8 @@ def normalize_source(src: str | Path, dest: str | Path) -> Path:
     src, dest = Path(src), Path(dest)
     _run([
         "ffmpeg", "-y", "-i", str(src),
-        "-map", "0:v:0", "-map", "0:a:0?", "-fps_mode", "cfr",
+        "-map", "0:v:0", "-map", "0:a:0?", "-dn", "-map_metadata", "-1",
+        "-fps_mode", "cfr",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
         "-c:a", "aac", "-b:a", "192k", str(dest),
     ])

@@ -38,8 +38,13 @@ def cut_clip(video: str | Path, cand: ah.Candidate, name: str) -> GameplayClip:
     clip = GameplayClip(name)
     dest = clip.dir / "source.mp4"
     if not clip.has_source():
+        # -fps_mode cfr: force constant frame rate so burned captions don't drift
+        # (long captures are often VFR). -map keeps only the first v+a, dropping
+        # any stray data/timecode track.
         _run(["ffmpeg", "-y", "-ss", f"{cand.start:.3f}", "-to", f"{cand.end:.3f}",
-              "-i", str(video), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+              "-i", str(video), "-map", "0:v:0", "-map", "0:a:0?", "-dn",
+              "-map_metadata", "-1", "-fps_mode", "cfr",
+              "-c:v", "libx264", "-pix_fmt", "yuv420p",
               "-c:a", "aac", "-b:a", "192k", str(dest)])
     return clip
 
