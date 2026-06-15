@@ -584,9 +584,11 @@ def voice_picked(label: str):
 
 
 def run_assemble(name: str, voice_id: str, stability: float, similarity: float,
-                 style: float, music_choice: str, force: bool):
+                 style: float, music_choice: str, force: bool,
+                 cap_style: str = "active_word", cap_font: str = "Anton"):
     ep = _require(name, "handoff", "run the handoff first")
     stages.apply_voice_settings(voice_id, stability, similarity, style)
+    stages.apply_caption_settings(cap_style, cap_font)
     music = None if music_choice in (None, "", "(no music)") else Path(music_choice)
     if ep.assemble_done() and not force:
         yield ("Final video already rendered for this script — tick "
@@ -1057,6 +1059,23 @@ def build_app() -> gr.Blocks:
                     eleven_tb = gr.Textbox(label="ELEVENLABS_API_KEY",
                                            type="password")
                 save_keys_btn = gr.Button("Save keys → .env (gitignored)")
+
+                gr.Markdown("### Captions")
+                with gr.Row():
+                    cap_style_dd = gr.Dropdown(
+                        label="Caption style",
+                        choices=[("Active word (big yellow, pops in)", "active_word"),
+                                 ("Classic (3 words/line)", "classic")],
+                        value=config.CAPTION_STYLE)
+                    cap_font_dd = gr.Dropdown(
+                        label="Active-word font",
+                        choices=["Anton", "Arial"],
+                        value=config.CAPTION_AW_FONT)
+                gr.Markdown(
+                    "Applies to the next build. Fine-tuning (size, colour, position, "
+                    "words-per-cue) lives in `config.py` under the `CAPTION_AW_*` "
+                    "settings. Anton is bundled in `fonts/` — no system install needed.")
+
                 gr.Markdown(
                     f"**Paths** — scripts: `scripts/` · style/character refs: "
                     f"`refs/` · manifests: `manifests/` · episode media: "
@@ -1179,7 +1198,7 @@ def build_app() -> gr.Blocks:
         sfx_clear_btn.click(clear_sfx, ep_state, [sfx_msg, sfx_summary_md])
         assemble_btn.click(run_assemble,
                            [ep_state, voice_id_tb, stab_sl, sim_sl, style_sl,
-                            music_dd, assemble_force_cb],
+                            music_dd, assemble_force_cb, cap_style_dd, cap_font_dd],
                            [assemble_status, assemble_video, banner])
         assemble_btn.click(lambda n: load_qc_tab(n)[0], ep_state, qc_video)
 

@@ -137,6 +137,18 @@ def apply_voice_settings(voice_id: str, stability: float, similarity: float,
         config.ELEVENLABS_MODEL = model
 
 
+def apply_caption_settings(style: str | None = None,
+                           font: str | None = None) -> None:
+    """Override the caption renderer choice / active-word font for this run. Like
+    apply_voice_settings, the modules read config at call time, so setting the
+    globals here is the supported way to pick a caption style per build. config.py
+    remains the persistent default and the home of the finer CAPTION_AW_* knobs."""
+    if style in ("active_word", "classic"):
+        config.CAPTION_STYLE = style
+    if font and font.strip():
+        config.CAPTION_AW_FONT = font.strip()
+
+
 def voice_assemble(ep: st.Episode, music_path: Path | None,
                    force: bool = False) -> Iterator[dict]:
     """TTS -> captions -> scenes -> assemble, mirroring pipeline.py's recipe
