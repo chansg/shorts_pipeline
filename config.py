@@ -22,6 +22,7 @@ MUSIC_DIR = ROOT / "assets" / "music"
 CUTAWAY_DIR = ROOT / "assets" / "cutaways"
 OUTPUT_DIR = ROOT / "output"
 WORK_DIR = ROOT / "output" / "_work"  # intermediate files (audio, subs)
+FONTS_DIR = ROOT / "fonts"            # bundled caption fonts (e.g. Anton), via fontsdir
 
 for _d in (SCRIPTS_DIR, IMAGES_DIR, MUSIC_DIR, CUTAWAY_DIR, OUTPUT_DIR, WORK_DIR):
     _d.mkdir(parents=True, exist_ok=True)
@@ -61,6 +62,23 @@ CAPTION_HIGHLIGHT = "&H0000F0FF" # yellow-ish for the active word
 CAPTION_OUTLINE = "&H00000000"   # black outline
 CAPTION_MARGIN_H = 90            # left/right margin so text wraps instead of clipping
 CAPTION_MARGIN_V = 360           # vertical position from bottom
+
+# Which caption renderer to use:
+#   "active_word" — one big bold uppercase word at a time, bright yellow, thick black
+#                   outline + shadow, centred low-middle, pops in synced to the voice.
+#   "classic"     — the older 3-words-per-line style (white with a yellow active word).
+CAPTION_STYLE = "active_word"    # "active_word" | "classic"
+
+# Active-word style knobs (used when CAPTION_STYLE == "active_word"). Reuses WIDTH/HEIGHT
+# above for the play resolution; the bundled font lives in fonts/ (see FONTS_DIR).
+CAPTION_AW_FONT = "Anton"        # bundled in fonts/ — no system install needed
+CAPTION_AW_FONTSIZE = 150        # ~8% of 1920 height
+CAPTION_AW_FILL = (255, 255, 0)        # yellow fill (r, g, b)
+CAPTION_AW_OUTLINE_RGB = (0, 0, 0)     # black outline (r, g, b)
+CAPTION_AW_OUTLINE = 7.0          # outline thickness
+CAPTION_AW_SHADOW = 3.0           # drop-shadow depth
+CAPTION_AW_POS_Y_FRAC = 0.60      # vertical centre of the word (0=top, 1=bottom)
+CAPTION_AW_WORDS_PER_CUE = 1      # 1 = pure active-word; 2 shows pairs
 
 # --- Visuals ---
 KEN_BURNS_ZOOM = 1.18        # how far the slow zoom pushes in over a scene

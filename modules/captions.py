@@ -120,17 +120,69 @@ def shift_words_after(words: list[Word], cut_time: float, amount: float) -> list
     return out
 
 
+def _to_tuples(words) -> list[tuple[str, float, float]]:
+    """Normalise whatever word-timestamp shape we're handed into (text, start, end)
+    tuples for the active-word renderer. Robust to Word objects, dicts (text/word +
+    start/end), and (text, start, end) tuples/lists."""
+    out: list[tuple[str, float, float]] = []
+    for w in words:
+        if isinstance(w, dict):
+            text = w.get("text", w.get("word", ""))
+            start, end = w["start"], w["end"]
+        elif isinstance(w, (tuple, list)):
+            text, start, end = w[0], w[1], w[2]
+        else:  # Word dataclass or any object with .text/.start/.end
+            text, start, end = w.text, w.start, w.end
+        out.append((str(text).strip(), float(start), float(end)))
+    return out
+
+
+def _write_ass_active_word(words, out_path: Path,
+                           script_text: str | None) -> Path:
+    """Active-word style: one big bold yellow word at a time, popping in synced to
+    the voice. Delegates the actual ASS to the vendored karaoke_captions module;
+    we only adapt our word data and map config -> CaptionStyle."""
+    from modules.karaoke_captions import CaptionStyle, build_ass
+    if script_text:
+        words, _ = align_script_words(words, script_text)
+    style = CaptionStyle(
+        font=config.CAPTION_AW_FONT,
+        fontsize=config.CAPTION_AW_FONTSIZE,
+        fill=tuple(config.CAPTION_AW_FILL),
+        outline_rgb=tuple(config.CAPTION_AW_OUTLINE_RGB),
+        outline=config.CAPTION_AW_OUTLINE,
+        shadow=config.CAPTION_AW_SHADOW,
+        play_w=config.WIDTH,
+        play_h=config.HEIGHT,
+        pos_y_frac=config.CAPTION_AW_POS_Y_FRAC,
+        words_per_cue=config.CAPTION_AW_WORDS_PER_CUE,
+        gap_fill=True,
+        max_gap=0.8,   # don't let a word linger across a long pause / cutaway gap
+        hold=0.4,
+    )
+    out_path.write_text(build_ass(_to_tuples(words), style), encoding="utf-8")
+    return out_path
+
+
 def write_ass(words: list[Word], out_path: str | Path,
               script_text: str | None = None,
               break_times: list[float] | None = None) -> Path:
-    """One short caption group at a time, with the active word highlighted.
-    Lines are continuous (no gaps) so nothing flickers or repeats. Groups never
-    straddle a `break_time` (cutaway boundary), and a caption won't linger across
-    a large gap (so captions clear during a cutscene)."""
+    """Render captions to an .ass file. Dispatches on config.CAPTION_STYLE:
+    "active_word" (one big yellow word that pops in) or "classic" (the older
+    3-words-per-line style with the active word highlighted).
+
+    Classic: one short caption group at a time, lines continuous (no gaps) so
+    nothing flickers or repeats. Groups never straddle a `break_time` (cutaway
+    boundary), and a caption won't linger across a large gap (clears during a
+    cutscene). `break_times` only applies to the classic path; the active-word
+    path clears long gaps via its own max_gap cap."""
     out_path = Path(out_path)
     if not words:
         out_path.write_text("", encoding="utf-8")
         return out_path
+
+    if getattr(config, "CAPTION_STYLE", "classic") == "active_word":
+        return _write_ass_active_word(words, out_path, script_text)
 
     if script_text:
         words, _ = align_script_words(words, script_text)
