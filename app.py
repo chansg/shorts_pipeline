@@ -1050,6 +1050,12 @@ def build_app() -> gr.Blocks:
                                         variant="primary")
                 approve_md = gr.Markdown("")
 
+            # ------------------------------------------------- Gameplay --
+            # Second, parallel pipeline (gameplay clips). Self-contained in
+            # gameplay/gui.py; the lore wizard above is untouched.
+            from gameplay.gui import build_gameplay_tab
+            build_gameplay_tab()
+
             # --------------------------------------------------- Settings
             with gr.Tab("⚙ Settings"):
                 keys_md = gr.Markdown(_key_status())
