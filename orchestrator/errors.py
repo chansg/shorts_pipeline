@@ -72,16 +72,17 @@ def friendly(exc: Exception) -> FriendlyError:
     if "out of memory" in low or "cuda" in low and "memory" in low:
         return FriendlyError(
             "GPU ran out of memory. Use a smaller WhisperX model "
-            "(gameplay/config.py: WHISPERX_MODEL='medium'), lower WHISPERX_BATCH, "
+            "(gameplay/config.py: WHISPERX_MODEL_CUDA='medium'), lower WHISPERX_BATCH, "
             "or transcribe a shorter clip.\n\nDetails: " + msg
         )
     if "pyannote" in low or ("huggingface" in low and ("401" in low or "token" in low
                                                        or "gated" in low)):
         return FriendlyError(
             "Diarization needs a valid HF_TOKEN and one-time acceptance of the "
-            "pyannote model terms (speaker-diarization-3.1 + segmentation-3.0) on "
-            "huggingface.co. Set HF_TOKEN in .env, or skip diarization to caption "
-            "as a single speaker.\n\nDetails: " + msg
+            "pyannote model licences on huggingface.co — click 'Agree' on BOTH "
+            "speaker-diarization-community-1 and segmentation-3.0. Set HF_TOKEN in "
+            ".env, or skip diarization to caption as a single speaker.\n\nDetails: "
+            + msg
         )
     if "whisperx" in low and "modulenotfound" in low:
         return FriendlyError(

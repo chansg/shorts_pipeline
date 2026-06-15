@@ -26,7 +26,11 @@ FONTS_DIR = _lore.FONTS_DIR
 # --- WhisperX transcribe + diarize ---
 # Read at call time so the Settings/env can override without a code edit.
 HF_TOKEN_ENV = "HF_TOKEN"          # HuggingFace read token (pyannote diarization)
-WHISPERX_MODEL = "large-v2"        # 3080 (10GB) handles large-v2; drop to "medium" if OOM
+# Model is chosen by device (see gameplay/device.py): large-v2 needs a GPU; on CPU
+# it is unusably slow, so we drop to a small model so the mode stays usable.
+WHISPERX_MODEL_CUDA = "large-v2"   # 3080 (10GB) handles large-v2; drop to "medium" if OOM
+WHISPERX_MODEL_CPU = "small"       # CPU fallback — large-v2 on CPU is impractical
+WHISPERX_MODEL = WHISPERX_MODEL_CUDA   # back-compat alias (the GPU default)
 WHISPERX_BATCH = 16                # transcription batch size; lower if GPU OOM
 WHISPERX_COMPUTE_CUDA = "float16"  # cuda compute type ("int8" uses less VRAM)
 WHISPERX_COMPUTE_CPU = "int8"      # cpu fallback compute type
@@ -48,7 +52,9 @@ BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are 
 # --- Captions ---
 CAPTION_FONT = _lore.CAPTION_AW_FONT          # bundled Anton by default
 CAPTION_FONTSIZE = _lore.CAPTION_AW_FONTSIZE
-CAPTION_POS_Y_FRAC = _lore.CAPTION_AW_POS_Y_FRAC
+# Lower than the lore default (0.60): on gameplay footage 0.60 sits on the weapon/
+# HUD. 0.78 drops captions into the lower blur band, off the action. GUI slider tunes it.
+CAPTION_POS_Y_FRAC = 0.78
 SPEAKER_PALETTE = list(DEFAULT_SPEAKER_PALETTE)  # offered in the transcript editor
 
 # --- Effects (starter set; the registry in effects.py is built to extend) ---

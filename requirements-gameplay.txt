@@ -11,18 +11,22 @@
 #     pip install -r requirements-gameplay.txt
 # (cu121 = CUDA 12.1; pick the tag matching your driver — see pytorch.org.)
 
-# Transcribe + word-align + diarize (one pass).
-whisperx>=3.1.1
+# Transcribe + word-align + diarize (one pass). PINNED to the tested combo — the
+# whisperx 3.2+ API moved DiarizationPipeline to whisperx.diarize and changed the
+# ctor kwarg (use_auth_token -> token); the diarization code targets this pair.
+whisperx==3.8.6
 
 # Speaker diarization model. Needs a free HuggingFace token (HF_TOKEN in .env)
-# and one-time acceptance of the pyannote model terms on huggingface.co:
-#   - https://huggingface.co/pyannote/speaker-diarization-3.1
+# AND one-time acceptance of the pyannote model licences on huggingface.co (a very
+# common gotcha — diarization fails until you click "Agree" on BOTH):
+#   - https://huggingface.co/pyannote/speaker-diarization-community-1   (default in whisperx 3.8)
 #   - https://huggingface.co/pyannote/segmentation-3.0
-pyannote.audio>=3.1
+pyannote.audio==4.0.4
 
-# torch/torchaudio are dependencies of the above; declared explicitly so the
-# CUDA build can be pinned via the --index-url note above.
-torch
-torchaudio
+# torch/torchaudio: PIN the version, but the wheel MUST be the CUDA build — install
+# it FIRST from the CUDA index (see the note above), otherwise you get the CPU-only
+# build and WhisperX runs on CPU (slow; full-auto becomes impractical).
+torch==2.8.0
+torchaudio==2.8.0
 
 # numpy is already in requirements.txt (the audio-energy envelope uses it).
