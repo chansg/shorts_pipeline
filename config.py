@@ -14,6 +14,11 @@ try:
 except ImportError:
     pass
 
+# Keys loaded from .env into the environment: ELEVENLABS_API_KEY, GEMINI_API_KEY,
+# and HF_TOKEN (the gameplay pipeline reads HF_TOKEN via gameplay/config.py for
+# pyannote speaker diarization — optional; without it gameplay falls back to
+# single-speaker captions).
+
 # --- Paths ---
 ROOT = Path(__file__).parent
 SCRIPTS_DIR = ROOT / "scripts"        # raw story seeds + rewritten scripts

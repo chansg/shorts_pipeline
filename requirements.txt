@@ -26,3 +26,7 @@ anthropic
 
 # System dependency (NOT pip): ffmpeg + ffprobe must be installed and on PATH.
 #   Windows:  winget install Gyan.FFmpeg     (then restart the terminal)
+
+# The gameplay pipeline (WhisperX + pyannote + torch) is heavy and GPU-specific,
+# so its deps live in a separate file — install only if you use that mode:
+#   pip install -r requirements-gameplay.txt    (see that file for the CUDA note)

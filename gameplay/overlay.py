@@ -97,14 +97,15 @@ def composite(base: str | Path, overlay_name: str, out: str | Path,
     elif start > 0:
         enable = f":enable='gte(t,{start:.3f})'"
 
-    # Loop a video overlay so a short animation can span its window; a still png
-    # naturally persists. PTS is shifted so the overlay's own t starts at `start`.
+    # The overlay input must be an endless stream so it persists across its enable
+    # window: loop a video overlay (a short animation repeats), and loop a still
+    # png (a single frame would otherwise show only at t=0 then vanish).
     if is_video:
         inputs = ["-i", str(base), "-stream_loop", "-1", "-i", str(asset)]
         setpts = f"[1:v]setpts=PTS-STARTPTS+{start}/TB[ov];"
         ov_label = "[ov]"
     else:
-        inputs = ["-i", str(base), "-i", str(asset)]
+        inputs = ["-i", str(base), "-loop", "1", "-i", str(asset)]
         setpts = ""
         ov_label = "[1:v]"
     graph = (f"{setpts}[0:v]{ov_label}overlay={x}:{y}{enable}:"

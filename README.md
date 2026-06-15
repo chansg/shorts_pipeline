@@ -118,6 +118,73 @@ font system-wide.
 
 ---
 
+## Gameplay pipeline (second, parallel mode)
+
+A separate pipeline for **gameplay footage**, alongside the lore wizard — its own
+**🎮 Gameplay** tab in the GUI. It takes a pre-trimmed clip (any game, any length,
+16:9 or other) and turns it into a 9:16 Short with per-speaker captions, optional
+effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
+
+### Manual mode (the main flow)
+
+1. **Upload** a pre-trimmed clip.
+2. **① Transcribe** — WhisperX transcribes, word-aligns, and (with a token)
+   diarizes the speakers in one GPU pass. No token / one voice → single-speaker.
+3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
+   (`SPEAKER_00` → "Chan") and pick their colours. *These rows are the captions.*
+4. Choose **effects** (punch-zoom / shake, driven off the audio-energy envelope),
+   a **caption** font/position, and a **like/subscribe overlay** (asset, position,
+   start, duration).
+5. **② Build Short** → reframe (blur-pad) → burn captions → effects → overlay →
+   `output/gameplay/<clip>/<clip>_short.mp4`. Stages are resumable.
+
+### Setup
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-gameplay.txt   # WhisperX + pyannote + torch (heavy)
+```
+
+`torch` must match your CUDA — install the CUDA build first (see the top of
+`requirements-gameplay.txt`). For diarization, add a free HuggingFace token to
+`.env` and accept the model terms once:
+
+```
+HF_TOKEN=hf_xxx
+```
+- https://huggingface.co/settings/tokens
+- accept: `pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`
+
+Without `HF_TOKEN` the gameplay pipeline still works — it just captions as a
+single speaker (no per-speaker colour). The first real transcribe+diarize run is
+yours to execute (it needs your GPU).
+
+### Overlays
+
+Like/subscribe assets live in `overlays/` — transparent `.png` or alpha video
+(`.mov` ProRes 4444 / `.webm` VP9). A placeholder
+(`like_subscribe_placeholder.png`) ships in the repo; drop your own in and click
+**↻ overlays**. Assets without an alpha channel are rejected with a clear error.
+
+### Captions / colours
+
+Captions reuse `modules/karaoke_captions` — the same active-word renderer as the
+lore path. The gameplay path passes 4-tuples `(text, start, end, speaker)`, which
+drive per-speaker colour (explicit hex wins; otherwise a 6-colour palette is
+auto-assigned in order of appearance). The bundled **Anton** font is used the same
+way (via `fontsdir`).
+
+### Full-auto (experimental)
+
+Under the **⚠ Experimental** accordion: ingest a long (~1hr) video, auto-detect &
+categorise highlights (an audio-energy spike pass + an LLM pass over the diarized
+transcript → clutch / funny / rage / story), auto-cut each, and run them through
+the manual backend. Compute-heavy and GPU-gated; per-candidate failures are
+contained; the LLM backend reuses `REWRITE_BACKEND` (ollama/claude). It is
+isolated from manual mode and cannot affect it.
+
+---
+
 ## The manifest (what stage 3 produces)
 
 `manifests/<name>.json`, aria-i2v schema — `defaults` (model, aspect, duration,

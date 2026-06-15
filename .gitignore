@@ -26,6 +26,12 @@ refs/*.jpg
 refs/*.jpeg
 refs/*.webp
 
+# Gameplay pipeline: per-clip work + finished Shorts live under output/ (already
+# ignored above). Overlay assets are user-supplied; keep only the placeholder.
+overlays/*
+!overlays/.gitkeep
+!overlays/like_subscribe_placeholder.png
+
 # Scratch
 _aria_extract/
 manifests/*.state.json

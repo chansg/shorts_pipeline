@@ -68,4 +68,24 @@ def friendly(exc: Exception) -> FriendlyError:
             "The API reported a quota/rate limit. Wait a minute and retry; "
             "check your plan's limits if it persists.\n\nDetails: " + msg
         )
+    # --- gameplay pipeline failure modes ---
+    if "out of memory" in low or "cuda" in low and "memory" in low:
+        return FriendlyError(
+            "GPU ran out of memory. Use a smaller WhisperX model "
+            "(gameplay/config.py: WHISPERX_MODEL='medium'), lower WHISPERX_BATCH, "
+            "or transcribe a shorter clip.\n\nDetails: " + msg
+        )
+    if "pyannote" in low or ("huggingface" in low and ("401" in low or "token" in low
+                                                       or "gated" in low)):
+        return FriendlyError(
+            "Diarization needs a valid HF_TOKEN and one-time acceptance of the "
+            "pyannote model terms (speaker-diarization-3.1 + segmentation-3.0) on "
+            "huggingface.co. Set HF_TOKEN in .env, or skip diarization to caption "
+            "as a single speaker.\n\nDetails: " + msg
+        )
+    if "whisperx" in low and "modulenotfound" in low:
+        return FriendlyError(
+            "WhisperX is not installed. Install the gameplay extras:\n"
+            "    pip install -r requirements-gameplay.txt"
+        )
     return FriendlyError(f"{type(exc).__name__}: {msg}")

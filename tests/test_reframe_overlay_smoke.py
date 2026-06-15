@@ -81,12 +81,26 @@ def test_caption_burn(synthetic_clip, tmp_path):
     assert out.exists() and _dims(out) == (gconf.WIDTH, gconf.HEIGHT)
 
 
-def test_overlay_composite(synthetic_clip, tmp_path):
+def _frame_png(video, out, t):
+    subprocess.run(["ffmpeg", "-y", "-ss", str(t), "-i", str(video),
+                    "-vframes", "1", str(out)], check=True, capture_output=True)
+    return out
+
+
+def test_overlay_composite_changes_pixels(synthetic_clip, tmp_path):
+    # Regression guard: a static-png overlay must PERSIST across its enable window
+    # (looped input), not show only at t=0. Compare a frame mid-window against the
+    # un-overlaid base and require a visible difference.
+    from PIL import Image, ImageChops
     assert PLACEHOLDER.exists(), "placeholder overlay should be committed"
     reframed = reframe_mod.reframe(synthetic_clip, tmp_path / "reframed.mp4")
     out = ov_mod.composite(reframed, PLACEHOLDER.name, tmp_path / "ov.mp4",
-                           position="bottom-center", start=0.2, duration=1.0)
+                           position="bottom-center", start=0.0, duration=1.5)
     assert out.exists() and _dims(out) == (gconf.WIDTH, gconf.HEIGHT)
+    base_f = Image.open(_frame_png(reframed, tmp_path / "b.png", 0.6)).convert("RGB")
+    ov_f = Image.open(_frame_png(out, tmp_path / "o.png", 0.6)).convert("RGB")
+    diff = ImageChops.difference(base_f, ov_f).getbbox()
+    assert diff is not None, "overlay produced no visible change mid-window"
 
 
 def test_overlay_missing_asset_raises(synthetic_clip, tmp_path):

@@ -1,0 +1,28 @@
+# ===== Gameplay pipeline extras (heavy / GPU-specific) =====
+# Kept separate from requirements.txt so a lore-only install stays small.
+# Install on top of the base requirements:
+#     pip install -r requirements.txt
+#     pip install -r requirements-gameplay.txt
+#
+# IMPORTANT — torch must match your CUDA. WhisperX pulls torch, but the default
+# wheel may be CPU-only. For an NVIDIA GPU (e.g. RTX 3080), install the CUDA
+# build FIRST, from PyTorch's index, then this file:
+#     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#     pip install -r requirements-gameplay.txt
+# (cu121 = CUDA 12.1; pick the tag matching your driver — see pytorch.org.)
+
+# Transcribe + word-align + diarize (one pass).
+whisperx>=3.1.1
+
+# Speaker diarization model. Needs a free HuggingFace token (HF_TOKEN in .env)
+# and one-time acceptance of the pyannote model terms on huggingface.co:
+#   - https://huggingface.co/pyannote/speaker-diarization-3.1
+#   - https://huggingface.co/pyannote/segmentation-3.0
+pyannote.audio>=3.1
+
+# torch/torchaudio are dependencies of the above; declared explicitly so the
+# CUDA build can be pinned via the --index-url note above.
+torch
+torchaudio
+
+# numpy is already in requirements.txt (the audio-energy envelope uses it).
