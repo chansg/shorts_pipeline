@@ -12,6 +12,7 @@ ffmpeg does the heavy lifting:
 from __future__ import annotations
 import subprocess
 import json
+import os
 from pathlib import Path
 import config
 from modules.visuals import Scene, is_video
@@ -169,11 +170,14 @@ def _mix_audio(voice: Path, music: Path | None, out: Path,
 
 def _burn_and_mux(video: Path, audio: Path, ass: Path, out: Path) -> None:
     # ass filter treats ':' as a separator, so run from the subtitle's folder and
-    # pass the bare filename (avoids the Windows drive-letter colon problem).
+    # pass the bare filename (avoids the Windows drive-letter colon problem). The
+    # bundled caption font (e.g. Anton) is found via fontsdir, given as a RELATIVE
+    # path from the .ass folder so it stays colon-free too — no system install needed.
     video, audio, out = video.resolve(), audio.resolve(), out.resolve()
+    fonts_rel = os.path.relpath(config.FONTS_DIR, ass.parent).replace("\\", "/")
     _run([
         "ffmpeg", "-y", "-i", str(video), "-i", str(audio),
-        "-vf", f"ass={ass.name}",
+        "-vf", f"ass={ass.name}:fontsdir={fonts_rel}",
         "-map", "0:v", "-map", "1:a", "-shortest",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
         "-c:a", "aac", "-b:a", "192k",
