@@ -60,3 +60,24 @@ class GameplayClip:
             "transcript": self.has_transcript(),
             "built": self.is_built(),
         }
+
+
+class AutoSession:
+    """One full-auto run over a long video. Holds the long-video transcript, the
+    detected candidates, and per-candidate preview thumbnails so detection and
+    review survive across GUI events (and re-runs). Lives under
+    output/gameplay/_auto/<videoslug>/.
+    """
+    def __init__(self, video_name: str):
+        self.name = slugify(video_name, "session")
+        self.dir = gconf.GAMEPLAY_DIR / "_auto" / self.name
+        self.previews_dir = self.dir / "previews"
+        self.previews_dir.mkdir(parents=True, exist_ok=True)
+        self.transcript_path = self.dir / "transcript.json"
+        self.candidates_path = self.dir / "candidates.json"
+
+    def preview_path(self, index: int) -> Path:
+        return self.previews_dir / f"cand_{index:02d}.jpg"
+
+    def has_candidates(self) -> bool:
+        return self.candidates_path.exists()

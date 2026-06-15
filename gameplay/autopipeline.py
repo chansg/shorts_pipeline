@@ -11,16 +11,19 @@ GPU+token gated for the transcribe step.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from modules.assemble import _run, _probe_duration
 from orchestrator.errors import FriendlyError, ensure_ffmpeg
 from gameplay import autohighlight as ah
 from gameplay.manual import ManualOptions, run_manual
-from gameplay.state import GameplayClip, slugify
+from gameplay.state import AutoSession, GameplayClip, slugify
 from gameplay.transcribe import transcribe
 from gameplay.transcript import Transcript, Word
+
+Progress = Callable[[str], None]
 
 
 def slice_transcript(transcript: Transcript, start: float, end: float) -> Transcript:
@@ -103,3 +106,102 @@ def run_autopipeline(video: str | Path, opts: ManualOptions | None = None,
 
     yield {"msg": f"Full-auto complete: {len(results)} clip(s) built.",
            "done": True, "results": results}
+
+
+# ---- review-first flow: detect -> review -> load-into-manual / batch --------
+# Splits detection from building so the user reviews candidates (with previews)
+# before committing GPU/render time. Building reuses the manual backend.
+
+def _cand_to_dict(c: ah.Candidate) -> dict:
+    return {"start": c.start, "end": c.end, "category": c.category,
+            "caption": c.caption, "score": c.score, "source": c.source}
+
+
+def _cand_from_dict(d: dict) -> ah.Candidate:
+    return ah.Candidate(float(d["start"]), float(d["end"]), d.get("category", "story"),
+                        d.get("caption", ""), float(d.get("score", 0.0)),
+                        d.get("source", "energy"))
+
+
+def candidate_name(session: AutoSession, cand: ah.Candidate) -> str:
+    return slugify(f"{session.name}_{int(round(cand.start))}s_{cand.category}")
+
+
+def make_preview(video: str | Path, cand: ah.Candidate, out: Path) -> Path:
+    """A single representative frame (downscaled) from the candidate's midpoint —
+    cheap thumbnail for the review gallery."""
+    mid = (cand.start + cand.end) / 2.0
+    _run(["ffmpeg", "-y", "-ss", f"{mid:.3f}", "-i", str(video), "-frames:v", "1",
+          "-vf", "scale=360:-2", str(out)])
+    return out
+
+
+def detect_candidates(video: str | Path, backend: str | None = None,
+                      max_clips: int = 8, diarize: bool = True,
+                      progress: Progress | None = None
+                      ) -> tuple[list[ah.Candidate], AutoSession]:
+    """Transcribe + detect + rank highlights for a long video — WITHOUT building.
+    Persists the transcript, candidates.json, and a preview thumbnail per
+    candidate so the GUI can present a review gallery. Returns (candidates,
+    session)."""
+    ensure_ffmpeg()
+    video = Path(video)
+    if not video.exists():
+        raise FriendlyError(f"Video not found: {video}")
+    emit = (lambda m: progress(m)) if progress else (lambda m: None)
+    session = AutoSession(video.stem)
+
+    total = _probe_duration(video)
+    emit(f"Ingesting {video.name} ({total/60:.1f} min). Transcribing + diarizing "
+         f"(the slow part — progress below)...")
+    transcript = transcribe(video, progress=progress, diarize=diarize)
+    transcript.save(session.transcript_path)
+
+    emit("Detecting loud moments (audio-energy pass)...")
+    energy = ah.energy_candidates(video)
+    emit(f"  {len(energy)} loud window(s).")
+    emit("Categorising with the LLM (clutch/funny/rage/story)...")
+    llm = ah.llm_candidates(transcript, backend)
+    emit(f"  {len(llm)} LLM-categorised window(s)"
+         f"{' (LLM unavailable — energy-only)' if not llm else ''}.")
+
+    candidates = ah.rank_candidates(energy, llm)[:max_clips]
+    session.candidates_path.write_text(
+        json.dumps([_cand_to_dict(c) for c in candidates], indent=2),
+        encoding="utf-8")
+    for i, c in enumerate(candidates):
+        try:
+            make_preview(video, c, session.preview_path(i))
+        except Exception:        # noqa: BLE001 — a missing thumb shouldn't sink detect
+            pass
+    emit(f"{len(candidates)} candidate(s) ready for review.")
+    return candidates, session
+
+
+def load_candidates(session: AutoSession) -> list[ah.Candidate]:
+    if not session.has_candidates():
+        return []
+    data = json.loads(session.candidates_path.read_text(encoding="utf-8"))
+    return [_cand_from_dict(d) for d in data]
+
+
+def load_candidate(session: AutoSession, video: str | Path, cand: ah.Candidate
+                   ) -> tuple[GameplayClip, Transcript]:
+    """Cut the candidate's clip (CFR) and slice its transcript, rebased to t=0, for
+    handoff into the manual flow. Returns (clip, transcript)."""
+    transcript = Transcript.load(session.transcript_path)
+    clip = cut_clip(video, cand, candidate_name(session, cand))
+    sub = slice_transcript(transcript, cand.start, cand.end)
+    sub.save(clip.transcript_path)
+    return clip, sub
+
+
+def build_candidate(session: AutoSession, video: str | Path, cand: ah.Candidate,
+                    opts: ManualOptions | None = None) -> Path | None:
+    """Build one candidate end-to-end via the manual backend (for batch build)."""
+    clip, sub = load_candidate(session, video, cand)
+    out = None
+    for ev in run_manual(clip, sub, opts or ManualOptions(), force=True):
+        if ev.get("done"):
+            out = ev["output"]
+    return out
