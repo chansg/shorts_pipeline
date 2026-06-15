@@ -31,7 +31,7 @@ One window, eight gated stages, end to end:
 6 Handoff       automatic — clips/stills placed into assets/images/ as
                 NN.mp4 / NN.png in manifest order (no manual renaming)
 7 Voice & Build ElevenLabs voice + settings → Whisper captions (script-
-                aligned, 3 words/line) → ffmpeg assemble + music
+                aligned, active-word style) → ffmpeg assemble + music
 8 Review        the human gate: spec check (1080×1920/30fps/audio), per-scene
                 contact sheet with near-black detection, then
                 Approve → ready to publish (opens the output folder)
@@ -59,6 +59,7 @@ shorts_pipeline/
 ├─ orchestrator/          # what the GUI calls: stages, state, manifest gen, QC
 ├─ i2v/                   # vendored aria-i2v: Nano Banana 2 + Veo 3.1
 │  └─ (CLI still works:  python -m i2v.cli --dry-run)
+├─ fonts/                 # bundled caption font (Anton, SIL OFL) — burned via fontsdir
 ├─ modules/               # script / tts / captions / visuals / assemble
 ├─ scripts/               # episode scripts (<name>.txt, one sentence per scene)
 ├─ refs/                  # style lock + character reference images
@@ -97,6 +98,23 @@ ELEVENLABS_API_KEY=...    # voiceover
   already rendered. Keep most scenes as stills.
 - Prompt drafting / title drafting are tiny Gemini text calls (optional —
   uncheck "Draft with Gemini" for a free deterministic draft).
+
+### Captions
+
+Two renderers, switchable with `CAPTION_STYLE` in `config.py` (or the **Settings**
+tab → *Caption style*, which applies to the next build):
+
+- **`active_word`** (default) — one big bold uppercase word at a time, bright yellow
+  with a thick black outline + shadow, centred low-middle, popping in synced to each
+  spoken word. Tune it with the `CAPTION_AW_*` settings (font, size, fill colour,
+  outline, vertical position, words-per-cue).
+- **`classic`** — the older 3-words-per-line style (white text, yellow active word),
+  tuned via the `CAPTION_*` settings.
+
+Both reuse the word-level Whisper timings the pipeline already produces (no
+re-transcription). The active-word font (**Anton**, SIL OFL) is bundled in `fonts/`
+and burned via ffmpeg's `fontsdir`, so it works on any machine without installing the
+font system-wide.
 
 ---
 
