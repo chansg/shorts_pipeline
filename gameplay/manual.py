@@ -77,6 +77,31 @@ def burn_captions(video: Path, ass: Path, out: Path) -> Path:
     return out
 
 
+def preview_captions(clip: GameplayClip, transcript: Transcript,
+                     opts: ManualOptions, seconds: float = 8.0) -> Path:
+    """Re-render JUST the caption track onto the first `seconds` of the reframed
+    clip — a fast 'did my edits land?' preview that never re-runs transcription.
+    Reuses the cached blur-pad (no effects/overlay). Returns the preview mp4."""
+    ensure_ffmpeg()
+    src = clip.source_path()
+    if src is None:
+        raise FriendlyError("No source clip for this gameplay clip.")
+    if not transcript.words:
+        raise FriendlyError("The transcript is empty — nothing to preview.")
+    reframe_mod.reframe(src, clip.reframed_path)          # cached
+    preview_src = clip.dir / "_preview_src.mp4"
+    preview_ass = clip.dir / "_preview.ass"
+    preview_out = clip.dir / "_preview.mp4"
+    for p in (preview_src, preview_out):
+        p.unlink(missing_ok=True)
+    # trim to the first N seconds; absolute caption times in the .ass still line up
+    _run(["ffmpeg", "-y", "-t", f"{seconds:.3f}", "-i", str(clip.reframed_path),
+          "-c", "copy", str(preview_src)])
+    write_captions(transcript, opts, preview_ass)
+    burn_captions(preview_src, preview_ass, preview_out)
+    return preview_out
+
+
 def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
                force: bool = False) -> Iterator[dict]:
     """Render the Short. `clip` must already have an imported source and an edited

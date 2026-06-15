@@ -21,6 +21,8 @@ import gradio as gr
 
 from orchestrator.errors import FriendlyError, friendly
 from gameplay import config as gconf
+from gameplay import editing as edit_mod
+from gameplay import manual as manual_mod
 from gameplay import overlay as ov_mod
 from gameplay import transcribe as transcribe_mod
 from gameplay.autopipeline import run_autopipeline
@@ -67,6 +69,46 @@ def _parse_speaker_rows(rows) -> dict:
         if name and rgb:
             out[name] = rgb
     return out
+
+
+# ---- transcript editor handlers (thin wrappers over gameplay.editing) ------
+
+def _edit_assign(rows, span, speaker):
+    return edit_mod.assign_speaker(rows, span, speaker), f"Assigned '{speaker}' to rows {span or '(none)'}."
+
+
+def _edit_find_replace(rows, find, repl, whole_word):
+    rows2, n = edit_mod.find_replace(rows, find, repl, whole_word=bool(whole_word))
+    return rows2, f"Replaced {n} occurrence(s) of '{find}'."
+
+
+def _edit_merge(rows, span):
+    return edit_mod.merge_rows(rows, span), f"Merged rows {span or '(none)'}."
+
+
+def _edit_split(rows, row_num):
+    try:
+        i = int(row_num)
+    except (TypeError, ValueError):
+        return rows, "Enter a row number to split."
+    return edit_mod.split_row(rows, i), f"Split row {i}."
+
+
+def _do_preview_captions(clip_name, rows, spk_rows, font, posy):
+    if not clip_name:
+        raise gr.Error("Transcribe a clip first.")
+    clip = GameplayClip(clip_name)
+    if not clip.has_source():
+        raise gr.Error("No source clip — upload and transcribe first.")
+    transcript = Transcript.from_rows(rows)
+    opts = _build_opts([], _NONE, gconf.OVERLAY_DEFAULT_POSITION, 0, 0, font, posy,
+                       spk_rows)
+    try:
+        return str(manual_mod.preview_captions(clip, transcript, opts))
+    except FriendlyError as fe:
+        raise gr.Error(str(fe), duration=None)
+    except Exception as e:                       # noqa: BLE001
+        raise gr.Error(str(friendly(e)), duration=None)
 
 
 # ---- handlers --------------------------------------------------------------
@@ -227,6 +269,33 @@ def build_gameplay_tab() -> None:
             type="array", interactive=True, row_count=(1, "dynamic"),
             label="Speaker colours (blank = auto palette; explicit hex wins)")
 
+        # Bulk-edit tools — gameplay ASR/diarization is noisy, so correcting the
+        # transcript is a core step. Edit text inline in the grid above; use these
+        # for the tedious bits (a whole stretch mislabelled, a name misheard, a
+        # mis-segmented phrase). Then preview just the captions before building.
+        with gr.Accordion("✏ Bulk edits & caption preview", open=False):
+            edit_status = gr.Markdown("Row numbers are 1-based (see the grid).")
+            with gr.Row():
+                edit_span_tb = gr.Textbox(
+                    label="Rows", placeholder="e.g. 3-10 or 3,4,7", scale=2)
+                edit_speaker_tb = gr.Textbox(label="Speaker", placeholder="Chan",
+                                             scale=2)
+                edit_assign_btn = gr.Button("Assign speaker to rows", scale=1)
+            with gr.Row():
+                edit_find_tb = gr.Textbox(label="Find", placeholder="Jet", scale=2)
+                edit_repl_tb = gr.Textbox(label="Replace", placeholder="Jett",
+                                          scale=2)
+                edit_whole_cb = gr.Checkbox(value=False, label="Whole word")
+                edit_replace_btn = gr.Button("Replace all", scale=1)
+            with gr.Row():
+                edit_merge_btn = gr.Button("Merge rows (uses Rows above)")
+                edit_split_row_n = gr.Number(label="Split row #", precision=0)
+                edit_split_btn = gr.Button("Split row")
+            with gr.Row():
+                preview_caps_btn = gr.Button("↻ Re-apply captions (preview)",
+                                             variant="secondary")
+            preview_video = gr.Video(label="Caption preview (first 8s, captions only)")
+
         # -- 3. styling controls --
         with gr.Row():
             effects_cbg = gr.CheckboxGroup(
@@ -236,7 +305,8 @@ def build_gameplay_tab() -> None:
             font_dd = gr.Dropdown(choices=["Anton", "Arial"],
                                   value=gconf.CAPTION_FONT, label="Caption font")
             posy_sl = gr.Slider(0.3, 0.9, value=gconf.CAPTION_POS_Y_FRAC, step=0.01,
-                                label="Caption vertical position")
+                                label="Caption Y (higher = lower; 0.78 keeps it in "
+                                      "the blur band, off the HUD)")
         with gr.Row():
             overlay_dd = gr.Dropdown(choices=[_NONE] + ov_mod.list_overlays(),
                                      value=_NONE, label="Like/subscribe overlay")
@@ -288,6 +358,23 @@ def build_gameplay_tab() -> None:
                   transcribe_status) \
             .then(_load_editor, clip_state,
                   [transcript_df, speaker_df, editor_md])
+
+        # transcript bulk-edit wiring (each returns updated grid rows + a status)
+        edit_assign_btn.click(_edit_assign,
+                              [transcript_df, edit_span_tb, edit_speaker_tb],
+                              [transcript_df, edit_status])
+        edit_replace_btn.click(_edit_find_replace,
+                               [transcript_df, edit_find_tb, edit_repl_tb,
+                                edit_whole_cb],
+                               [transcript_df, edit_status])
+        edit_merge_btn.click(_edit_merge, [transcript_df, edit_span_tb],
+                             [transcript_df, edit_status])
+        edit_split_btn.click(_edit_split, [transcript_df, edit_split_row_n],
+                             [transcript_df, edit_status])
+        preview_caps_btn.click(
+            _do_preview_captions,
+            [clip_state, transcript_df, speaker_df, font_dd, posy_sl],
+            preview_video)
 
         refresh_ov_btn.click(_refresh_overlays, None, overlay_dd)
 

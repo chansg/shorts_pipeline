@@ -108,3 +108,19 @@ def test_overlay_missing_asset_raises(synthetic_clip, tmp_path):
     reframed = reframe_mod.reframe(synthetic_clip, tmp_path / "reframed.mp4")
     with pytest.raises(FriendlyError):
         ov_mod.composite(reframed, "does_not_exist.mov", tmp_path / "x.mp4")
+
+
+def test_preview_captions_renders(synthetic_clip, tmp_path, monkeypatch):
+    # manual.preview_captions: caption-only preview on the first N seconds, no GPU.
+    import gameplay.config as gconf
+    from gameplay import manual as manual_mod
+    from gameplay.state import GameplayClip
+    from gameplay.transcript import Transcript, Word
+    monkeypatch.setattr(gconf, "GAMEPLAY_DIR", tmp_path)
+    monkeypatch.setattr(manual_mod.gconf, "GAMEPLAY_DIR", tmp_path)
+    clip = GameplayClip("prev")
+    import shutil as _sh
+    _sh.copy2(synthetic_clip, clip.dir / "source.mp4")
+    t = Transcript([Word("hi", 0.1, 0.6, "S0"), Word("yo", 0.6, 1.2, "S1")])
+    out = manual_mod.preview_captions(clip, t, manual_mod.ManualOptions(), seconds=1.5)
+    assert out.exists() and _dims(out) == (gconf.WIDTH, gconf.HEIGHT)
