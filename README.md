@@ -127,14 +127,21 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
 
 ### Manual mode (the main flow)
 
-1. **Upload** a pre-trimmed clip.
+1. **Upload** a pre-trimmed clip. (Ingest strips stray data/timecode tracks and
+   forces CFR when needed, so burned captions don't drift on VFR captures.)
 2. **① Transcribe** — WhisperX transcribes, word-aligns, and (with a token)
-   diarizes the speakers in one GPU pass. No token / one voice → single-speaker.
+   diarizes the speakers in one pass. The device is auto-detected: **CUDA →
+   large-v2; CPU → a smaller model** with a loud warning (see Setup). No token /
+   one voice → single-speaker.
 3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
    (`SPEAKER_00` → "Chan") and pick their colours. *These rows are the captions.*
+   The **Bulk edits & caption preview** panel adds: multi-row speaker reassignment
+   (fix a stretch the diariser mislabelled), find/replace (a misheard name, fixed
+   once), merge/split rows, and a **Re-apply captions** preview that re-renders
+   just the caption track — no re-transcription.
 4. Choose **effects** (punch-zoom / shake, driven off the audio-energy envelope),
-   a **caption** font/position, and a **like/subscribe overlay** (asset, position,
-   start, duration).
+   a **caption** font/position (default `0.78` sits in the lower blur band, off the
+   HUD), and a **like/subscribe overlay** (asset, position, start, duration).
 5. **② Build Short** → reframe (blur-pad) → burn captions → effects → overlay →
    `output/gameplay/<clip>/<clip>_short.mp4`. Stages are resumable.
 
@@ -142,22 +149,34 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
 
 ```bash
 pip install -r requirements.txt
-pip install -r requirements-gameplay.txt   # WhisperX + pyannote + torch (heavy)
+# IMPORTANT: install the CUDA-matched torch FIRST, or you get the CPU-only build
+# and WhisperX runs on CPU (slow; full-auto becomes impractical):
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements-gameplay.txt   # WhisperX + pyannote (pinned)
 ```
 
-`torch` must match your CUDA — install the CUDA build first (see the top of
-`requirements-gameplay.txt`). For diarization, add a free HuggingFace token to
-`.env` and accept the model terms once:
+The pipeline auto-detects the device: **CUDA → large-v2**, **CPU → `small`** with a
+prominent warning in the transcribe log naming this exact fix. (The first real run
+ran on CPU because the installed torch was the CPU-only build — `cu121` above is the
+cure; pick the tag matching your driver.)
+
+For **diarization** (per-speaker colour) you need a token **and** to accept the
+pyannote model licences once — a common gotcha that otherwise fails with an auth
+error:
 
 ```
 HF_TOKEN=hf_xxx
 ```
-- https://huggingface.co/settings/tokens
-- accept: `pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`
+- token: https://huggingface.co/settings/tokens
+- click **Agree** on BOTH (whisperx 3.8 defaults to community-1):
+  - https://huggingface.co/pyannote/speaker-diarization-community-1
+  - https://huggingface.co/pyannote/segmentation-3.0
 
-Without `HF_TOKEN` the gameplay pipeline still works — it just captions as a
-single speaker (no per-speaker colour). The first real transcribe+diarize run is
-yours to execute (it needs your GPU).
+Without `HF_TOKEN` (or the licence) the pipeline still works — it just captions as a
+single speaker (no per-speaker colour), and the log says which of the two is
+missing. The pinned, tested stack is whisperx 3.8.6 / pyannote.audio 4.0.4 /
+torch 2.8.0. **The first real transcribe+diarize run is yours to execute** (needs
+your GPU, token, and accepted licence).
 
 ### Overlays
 
@@ -174,14 +193,25 @@ drive per-speaker colour (explicit hex wins; otherwise a 6-colour palette is
 auto-assigned in order of appearance). The bundled **Anton** font is used the same
 way (via `fontsdir`).
 
-### Full-auto (experimental)
+### Full-auto (experimental) — review-first
 
-Under the **⚠ Experimental** accordion: ingest a long (~1hr) video, auto-detect &
-categorise highlights (an audio-energy spike pass + an LLM pass over the diarized
-transcript → clutch / funny / rage / story), auto-cut each, and run them through
-the manual backend. Compute-heavy and GPU-gated; per-candidate failures are
-contained; the LLM backend reuses `REWRITE_BACKEND` (ollama/claude). It is
-isolated from manual mode and cannot affect it.
+Under the **⚠ Experimental** accordion, a long video becomes a *reviewable* set of
+candidates rather than an unattended export:
+
+1. **① Detect highlights** — transcribe + diarize the long video (staged progress;
+   GPU-gated), then detect & categorise candidates: an audio-energy spike pass + an
+   LLM pass over the diarized transcript → clutch / funny / rage / story, each with
+   a time range, score, and suggested hook caption. No building yet.
+2. **Review gallery** — candidates appear as preview thumbnails + a table; tick the
+   ones worth keeping.
+3. **② Load selected into manual** — the first ticked candidate is cut and its
+   transcript sliced, then **loaded into the manual flow above** so you QC the
+   transcript and build it with per-clip control (the human-in-the-loop path).
+   Or **Batch-build selected** to render them all with the current settings.
+
+Building always reuses the manual backend (no duplicate render path). Compute-heavy
+and GPU-gated; detection is failure-contained; the LLM backend reuses
+`REWRITE_BACKEND` (ollama/claude). Isolated from manual mode and cannot affect it.
 
 ---
 
