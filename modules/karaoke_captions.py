@@ -23,6 +23,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# RGB palette auto-assigned to speakers (in order of first appearance) when no
+# explicit colour is set. Module-level so callers (e.g. the gameplay transcript
+# editor) can show the same swatches the renderer will use.
+DEFAULT_SPEAKER_PALETTE: list[tuple[int, int, int]] = [
+    (255, 235, 0),    # yellow
+    (0, 229, 255),    # cyan
+    (118, 255, 3),    # lime
+    (255, 64, 129),   # hot pink
+    (255, 145, 0),    # orange
+    (179, 136, 255),  # violet
+]
+
 
 def _ass_time(t: float) -> str:
     """Seconds -> H:MM:SS.cc (centiseconds), ASS format."""
@@ -60,6 +72,12 @@ class CaptionStyle:
     words_per_cue: int = 1           # 1 = pure active-word; 2 works too
     max_gap: float | None = None     # if next word is >max_gap away, don't stretch; hold instead
     hold: float = 0.4                # how long a word lingers when a big gap is capped
+    # Per-speaker colour (gameplay pipeline). Explicit map wins; otherwise speakers
+    # are auto-assigned from the palette in order of first appearance. With no
+    # speaker on a cue (the 3-tuple lore path) the style default fill is used.
+    speaker_colors: dict[str, tuple[int, int, int]] = field(default_factory=dict)
+    speaker_palette: list[tuple[int, int, int]] = field(
+        default_factory=lambda: list(DEFAULT_SPEAKER_PALETTE))
 
 
 def _header(st: CaptionStyle) -> str:
@@ -82,14 +100,30 @@ def _header(st: CaptionStyle) -> str:
     )
 
 
-def _cue_text(st: CaptionStyle, text: str) -> str:
+def _resolve_speaker_color(st: CaptionStyle, speaker, assigned: dict) -> str | None:
+    """Return an ASS colour override for a speaker, or None to use the style default.
+
+    An explicit `speaker_colors[speaker]` wins; otherwise the speaker is assigned
+    the next palette colour in order of first appearance (cached in `assigned`)."""
+    if speaker is None:
+        return None
+    if speaker in st.speaker_colors:
+        return _ass_color(*st.speaker_colors[speaker])
+    if speaker not in assigned:
+        idx = len(assigned) % len(st.speaker_palette)
+        assigned[speaker] = st.speaker_palette[idx]
+    return _ass_color(*assigned[speaker])
+
+
+def _cue_text(st: CaptionStyle, text: str, color: str | None = None) -> str:
     if st.uppercase:
         text = text.upper()
     x = st.play_w // 2
     y = int(st.play_h * st.pos_y_frac)
+    color_tag = f"\\c{color}&" if color else ""
     # pop: small -> overshoot -> settle, with a quick fade-in/out
     anim = (
-        f"\\pos({x},{y})\\an5\\fad({st.fade_ms},{st.fade_ms})"
+        f"\\pos({x},{y})\\an5\\fad({st.fade_ms},{st.fade_ms}){color_tag}"
         f"\\fscx70\\fscy70"
         f"\\t(0,{st.pop_in_ms},\\fscx112\\fscy112)"
         f"\\t({st.pop_in_ms},{st.pop_in_ms + st.settle_ms},\\fscx100\\fscy100)"
@@ -97,22 +131,30 @@ def _cue_text(st: CaptionStyle, text: str) -> str:
     return "{" + anim + "}" + text.replace("\n", " ")
 
 
-def build_ass(words: list[tuple[str, float, float]], style: CaptionStyle | None = None) -> str:
-    """words: list of (text, start_s, end_s) from Whisper word alignment."""
+def build_ass(words, style: CaptionStyle | None = None) -> str:
+    """words: list of (text, start_s, end_s) OR (text, start_s, end_s, speaker).
+
+    The 4-tuple form drives per-speaker colour (gameplay pipeline). The editable
+    transcript the review step produces is exactly this list of tuples, so a
+    corrected transcript flows straight in with no other changes. The 3-tuple form
+    (lore path) leaves `speaker` as None and uses the style's default fill.
+    """
     st = style or CaptionStyle()
     lines = [_header(st)]
+    assigned: dict = {}  # speaker -> colour, in order of first appearance
 
     # group words per cue (default 1)
-    cues: list[tuple[str, float, float]] = []
+    cues: list[tuple[str, float, float, object]] = []
     n = st.words_per_cue
     for i in range(0, len(words), n):
         chunk = words[i:i + n]
         text = " ".join(w[0] for w in chunk)
         start = chunk[0][1]
         end = chunk[-1][2]
-        cues.append((text, start, end))
+        speaker = chunk[0][3] if len(chunk[0]) > 3 else None
+        cues.append((text, start, end, speaker))
 
-    for i, (text, start, end) in enumerate(cues):
+    for i, (text, start, end, speaker) in enumerate(cues):
         # extend to next cue's start so a single word stays up with no flicker,
         # unless the gap is too big (a long pause / cutaway) — then just hold briefly.
         if st.gap_fill and i + 1 < len(cues):
@@ -123,13 +165,15 @@ def build_ass(words: list[tuple[str, float, float]], style: CaptionStyle | None 
                 end = max(end, next_start)
         if end - start < st.min_hold_s:
             end = start + st.min_hold_s
+        color = _resolve_speaker_color(st, speaker, assigned)
         lines.append(
-            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Pop,,0,0,0,,{_cue_text(st, text)}"
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Pop,,0,0,0,,"
+            f"{_cue_text(st, text, color)}"
         )
     return "\n".join(lines) + "\n"
 
 
-def write_ass(words: list[tuple[str, float, float]], path: str,
+def write_ass(words, path: str,
               style: CaptionStyle | None = None) -> str:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(build_ass(words, style))
