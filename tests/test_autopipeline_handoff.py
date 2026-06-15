@@ -78,3 +78,24 @@ def test_make_preview_thumbnail(long_clip, tmp_path):
     out = ap.make_preview(long_clip, Candidate(1.0, 3.0, "funny", ""),
                           tmp_path / "thumb.jpg")
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_gui_handoff_populates_manual_inputs(long_clip, tmp_path, monkeypatch):
+    # The candidate->manual GUI handoff: a selected candidate must populate the
+    # manual clip_state + source + transcript rows + speaker rows.
+    import json
+    from gameplay import gui
+    monkeypatch.setattr(gconf, "GAMEPLAY_DIR", tmp_path)
+    session = AutoSession("vod")
+    Transcript([Word("aim", 1.0, 1.4, "S0"), Word("fire", 3.0, 3.4, "S1"),
+                Word("reload", 5.0, 5.4, "S0")]).save(session.transcript_path)
+    cands = [Candidate(2.0, 4.0, "clutch", "nice clutch", 1.5, "energy+llm")]
+    session.candidates_path.write_text(
+        json.dumps([ap._cand_to_dict(c) for c in cands]), encoding="utf-8")
+
+    assert gui._selected_indices(["1. [clutch] ...", "bad"]) == [0]
+    clip_name, src, rows, spk_rows, note = gui._load_into_manual(
+        str(long_clip), ["1. [clutch] 2-4s · 1.50 · nice clutch"])
+    assert clip_name and src and src.endswith(".mp4")
+    assert [r[0] for r in rows] == ["fire"]            # sliced + rebased transcript
+    assert "clutch" in note.lower()
