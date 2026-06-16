@@ -210,9 +210,35 @@ def _emit(progress: Progress | None, msg: str) -> None:
         progress(msg)
 
 
+def _is_oom(e: Exception) -> bool:
+    low = str(e).lower()
+    return ("out of memory" in low or "cuda oom" in low or "cublas" in low
+            or "alloc" in low and "cuda" in low)
+
+
+def _transcribe_with_oom_retry(model, audio, batch: int, oom_batch: int,
+                               progress: Progress | None):
+    """Run ASR; on a CUDA OOM, free VRAM and retry ONCE at a smaller batch with a
+    clear log (rather than crashing). A second OOM propagates to a friendly error."""
+    try:
+        return model.transcribe(audio, batch_size=batch)
+    except Exception as e:                       # noqa: BLE001
+        if _is_oom(e) and oom_batch < batch:
+            device_mod.free_vram()
+            _emit(progress, f"⚠ CUDA OOM at batch={batch}; freed VRAM, retrying "
+                            f"once at batch={oom_batch}...")
+            return model.transcribe(audio, batch_size=oom_batch)
+        raise
+
+
 def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
-               diarize: bool = True) -> Transcript:
+               diarize: bool = True, batch_size: int | None = None) -> Transcript:
     """Transcribe + word-align + optionally diarize `audio_or_video`.
+
+    Long-video safe on a 10GB card: the ASR model's VRAM is released before the
+    alignment model loads, and again before diarization, so the card never holds
+    two models at once. `batch_size` overrides the default (full-auto passes a
+    smaller one); a CUDA OOM retries once at a smaller batch.
 
     Returns a Transcript. Falls back to single-speaker when there's no HF token,
     pyannote finds <=1 voice, or diarization errors. Raises FriendlyError for the
@@ -229,15 +255,20 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
     plan = device_mod.plan_device()
     if plan.warning:
         _emit(progress, plan.warning)
-    _emit(progress, f"Loading WhisperX ({plan.describe()})...")
+    batch = int(batch_size or gconf.WHISPERX_BATCH)
+    _emit(progress, f"Loading WhisperX ({plan.describe()}, batch={batch})...")
     try:
         model = whisperx.load_model(plan.model, plan.device,
                                     compute_type=plan.compute_type)
         audio = whisperx.load_audio(path)
         _emit(progress, "Transcribing...")
-        result = model.transcribe(audio, batch_size=gconf.WHISPERX_BATCH)
+        result = _transcribe_with_oom_retry(model, audio, batch,
+                                            gconf.AUTO_TRANSCRIBE_BATCH_OOM, progress)
     except Exception as e:                       # noqa: BLE001 — re-raise as friendly
         raise _friendly_transcribe_error(e)
+    # release the ASR model's VRAM before the alignment model loads (10GB card)
+    del model
+    device_mod.free_vram()
 
     if not result.get("segments"):
         raise FriendlyError(
@@ -252,6 +283,9 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
                                 plan.device, return_char_alignments=False)
     except Exception as e:                       # noqa: BLE001
         raise _friendly_transcribe_error(e)
+    # release the alignment model before diarization loads its model
+    del align_model, metadata
+    device_mod.free_vram()
 
     token = gconf.hf_token()
     if diarize and token:
@@ -263,6 +297,8 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
             _emit(progress, f"Diarization: {n} speaker(s) over {len(turns)} turn(s).")
         except Exception as e:                   # noqa: BLE001 — degrade gracefully
             _emit(progress, _diar_failure_message(e))
+        finally:
+            device_mod.free_vram()
     elif diarize and not token:
         _emit(progress, "No HF_TOKEN set — single-speaker captions "
                         "(set HF_TOKEN in .env + accept the pyannote licence to "

@@ -48,6 +48,20 @@ def _cuda_available() -> bool:
         return False
 
 
+def free_vram() -> None:
+    """Release cached CUDA memory + run a GC pass. Called between the transcription
+    and diarization models so a 10GB card never holds both at once. No-op (never
+    raises) when torch is missing or CPU-only."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:       # noqa: BLE001 — best-effort; never fatal
+        pass
+
+
 def plan_device() -> DevicePlan:
     """Pick the device + matching model size. CUDA when available, else CPU with a
     smaller model and a prominent warning explaining the fix."""
