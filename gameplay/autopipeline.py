@@ -18,6 +18,7 @@ from typing import Callable, Iterator
 from modules.assemble import _run, _probe_duration
 from orchestrator.errors import FriendlyError, ensure_ffmpeg
 from gameplay import autohighlight as ah
+from gameplay import config as gconf
 from gameplay.manual import ManualOptions, run_manual
 from gameplay.state import AutoSession, GameplayClip, slugify
 from gameplay.transcribe import transcribe
@@ -67,19 +68,17 @@ def run_autopipeline(video: str | Path, opts: ManualOptions | None = None,
     total = _probe_duration(video)
     yield {"msg": f"Ingesting {video.name} ({total/60:.1f} min). "
                   f"Transcribing + diarizing (this is the slow part)..."}
-    transcript = transcribe(video, progress=lambda m: None)
+    transcript = transcribe(video, progress=lambda m: None,
+                            batch_size=gconf.AUTO_TRANSCRIBE_BATCH)
     yield {"msg": f"Transcript: {len(transcript.words)} words, "
                   f"{'single speaker' if transcript.single_speaker else f'{len(transcript.speakers)} speakers'}."}
 
-    yield {"msg": "Detecting loud moments (audio-energy pass)..."}
-    energy = ah.energy_candidates(video)
-    yield {"msg": f"  {len(energy)} loud window(s)."}
-    yield {"msg": "Categorising with the LLM (clutch/funny/rage/story)..."}
-    llm = ah.llm_candidates(transcript, backend)
-    yield {"msg": f"  {len(llm)} LLM-categorised window(s)"
-                  f"{' (LLM unavailable — energy-only)' if not llm else ''}."}
-
-    candidates = ah.rank_candidates(energy, llm)[:max_clips]
+    log: list[str] = []
+    yield {"msg": "Detecting highlights (energy + reactions + LLM judge)..."}
+    candidates = ah.detect_highlights(video, transcript, backend=backend,
+                                      progress=log.append, top_n=max_clips)
+    for line in log:
+        yield {"msg": line}
     if not candidates:
         yield {"msg": "No candidates found.", "done": True, "results": []}
         return
@@ -114,13 +113,14 @@ def run_autopipeline(video: str | Path, opts: ManualOptions | None = None,
 
 def _cand_to_dict(c: ah.Candidate) -> dict:
     return {"start": c.start, "end": c.end, "category": c.category,
-            "caption": c.caption, "score": c.score, "source": c.source}
+            "caption": c.caption, "score": c.score, "source": c.source,
+            "reason": c.reason}
 
 
 def _cand_from_dict(d: dict) -> ah.Candidate:
     return ah.Candidate(float(d["start"]), float(d["end"]), d.get("category", "story"),
                         d.get("caption", ""), float(d.get("score", 0.0)),
-                        d.get("source", "energy"))
+                        d.get("source", "energy"), d.get("reason", ""))
 
 
 def candidate_name(session: AutoSession, cand: ah.Candidate) -> str:
@@ -137,44 +137,52 @@ def make_preview(video: str | Path, cand: ah.Candidate, out: Path) -> Path:
 
 
 def detect_candidates(video: str | Path, backend: str | None = None,
-                      max_clips: int = 8, diarize: bool = True,
+                      max_clips: int | None = None, diarize: bool = True,
                       progress: Progress | None = None
                       ) -> tuple[list[ah.Candidate], AutoSession]:
-    """Transcribe + detect + rank highlights for a long video — WITHOUT building.
+    """Transcribe + fused highlight detection for a long video — WITHOUT building.
     Persists the transcript, candidates.json, and a preview thumbnail per
     candidate so the GUI can present a review gallery. Returns (candidates,
-    session)."""
+    session). Staged progress with elapsed time across transcribe -> detect ->
+    preview so an hour-long job never looks hung."""
+    import time
     ensure_ffmpeg()
     video = Path(video)
     if not video.exists():
         raise FriendlyError(f"Video not found: {video}")
     emit = (lambda m: progress(m)) if progress else (lambda m: None)
     session = AutoSession(video.stem)
+    top_n = int(max_clips) if max_clips else gconf.AUTO_TOP_N
 
     total = _probe_duration(video)
-    emit(f"Ingesting {video.name} ({total/60:.1f} min). Transcribing + diarizing "
-         f"(the slow part — progress below)...")
-    transcript = transcribe(video, progress=progress, diarize=diarize)
+    mins = total / 60.0
+    if mins > gconf.AUTO_MAX_MINUTES:        # warn, don't block
+        emit(f"⚠ Video is {mins:.0f} min (over the ~{gconf.AUTO_MAX_MINUTES} min "
+             f"guideline). Proceeding, but transcription will take a while.")
+    t0 = time.time()
+    emit(f"[1/3] Ingesting {video.name} ({mins:.1f} min). Transcribing + diarizing "
+         f"— the slow step (roughly real-time-ish on GPU); progress below...")
+    transcript = transcribe(video, progress=progress, diarize=diarize,
+                            batch_size=gconf.AUTO_TRANSCRIBE_BATCH)
     transcript.save(session.transcript_path)
+    spk = ("single speaker" if transcript.single_speaker
+           else f"{len(transcript.speakers)} speakers")
+    emit(f"[2/3] Detecting highlights ({len(transcript.words)} words, {spk}; "
+         f"{time.time() - t0:.0f}s elapsed)...")
+    candidates = ah.detect_highlights(video, transcript, backend=backend,
+                                      progress=progress, top_n=top_n)
 
-    emit("Detecting loud moments (audio-energy pass)...")
-    energy = ah.energy_candidates(video)
-    emit(f"  {len(energy)} loud window(s).")
-    emit("Categorising with the LLM (clutch/funny/rage/story)...")
-    llm = ah.llm_candidates(transcript, backend)
-    emit(f"  {len(llm)} LLM-categorised window(s)"
-         f"{' (LLM unavailable — energy-only)' if not llm else ''}.")
-
-    candidates = ah.rank_candidates(energy, llm)[:max_clips]
     session.candidates_path.write_text(
         json.dumps([_cand_to_dict(c) for c in candidates], indent=2),
         encoding="utf-8")
+    emit(f"[3/3] Rendering {len(candidates)} preview thumbnail(s)...")
     for i, c in enumerate(candidates):
         try:
             make_preview(video, c, session.preview_path(i))
         except Exception:        # noqa: BLE001 — a missing thumb shouldn't sink detect
             pass
-    emit(f"{len(candidates)} candidate(s) ready for review.")
+    emit(f"Done in {time.time() - t0:.0f}s — {len(candidates)} candidate(s) ready "
+         f"for review.")
     return candidates, session
 
 
