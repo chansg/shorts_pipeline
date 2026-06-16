@@ -199,9 +199,10 @@ Under the **⚠ Experimental** accordion, a long video becomes a *reviewable* se
 candidates rather than an unattended export:
 
 1. **① Detect highlights** — transcribe + diarize the long video (staged progress;
-   GPU-gated), then detect & categorise candidates: an audio-energy spike pass + an
-   LLM pass over the diarized transcript → clutch / funny / rage / story, each with
-   a time range, score, and suggested hook caption. No building yet.
+   GPU-gated), then a **fused detector** finds & categorises candidates: audio-energy
+   peaks + a reaction-keyword scan + an **LLM judge** over the transcript →
+   clutch / funny / rage / hype / story, each with a time range, score, and hook
+   caption. No building yet.
 2. **Review gallery** — candidates appear as preview thumbnails + a table; tick the
    ones worth keeping.
 3. **② Load selected into manual** — the first ticked candidate is cut and its
@@ -210,8 +211,30 @@ candidates rather than an unattended export:
    Or **Batch-build selected** to render them all with the current settings.
 
 Building always reuses the manual backend (no duplicate render path). Compute-heavy
-and GPU-gated; detection is failure-contained; the LLM backend reuses
-`REWRITE_BACKEND` (ollama/claude). Isolated from manual mode and cannot affect it.
+and GPU-gated; detection is failure-contained (a bad LLM chunk, a CUDA OOM, or zero
+candidates each degrade gracefully); the LLM backend reuses `REWRITE_BACKEND`
+(ollama/claude). Isolated from manual mode and cannot affect it.
+
+**Long videos (1–60 min) on a 10GB card.** The ASR model's VRAM is released before
+the alignment model loads, and again before diarization, so the card never holds two
+models at once; transcription uses `AUTO_TRANSCRIBE_BATCH` and retries once at a
+smaller batch on a CUDA OOM; the LLM judge runs over ~2.5-min transcript chunks (never
+the whole hour at once). Past `AUTO_MAX_MINUTES` you get a warning, not a block.
+
+**Tuning the detector (first runs are calibration).** Every threshold/weight/lexicon
+lives in the `AUTO_*` block of `gameplay/config.py`, commented inline:
+- **Energy peaks** — `AUTO_ENERGY_K` (sensitivity), `AUTO_ENERGY_MIN_PROMINENCE`,
+  `AUTO_ENERGY_MIN_SPACING_S`, `AUTO_ENERGY_ROLL_S` (local-normalisation window).
+- **Reaction lexicon** — `AUTO_REACTION_LEXICON`, a per-category phrase dict; **add
+  your group's slang and the games you play** here.
+- **Window framing** — `AUTO_CLIP_MIN_S` / `AUTO_CLIP_MAX_S`, `AUTO_LEAD_IN_S`,
+  `AUTO_LEAD_OUT_S`.
+- **LLM chunking** — `AUTO_LLM_CHUNK_S`, `AUTO_LLM_CHUNK_OVERLAP_S`.
+- **Score weights** (default LLM-led) — `AUTO_W_LLM` 0.50, `AUTO_W_ENERGY` 0.25,
+  `AUTO_W_REACTION` 0.15, `AUTO_W_OVERLAP` 0.10; `AUTO_TOP_N` caps survivors.
+
+Detection is deterministic given the same transcript + config, so tuning is
+reproducible (the LLM's own output is the only non-deterministic input).
 
 ---
 
