@@ -76,7 +76,58 @@ OVERLAY_DEFAULT_DURATION = 4.0    # seconds (0 / None = whole clip)
 # --- Full-auto (experimental) ---
 AUTO_LLM_BACKEND = _lore.REWRITE_BACKEND      # reuse "ollama" | "claude" | "none"
 AUTO_OLLAMA_MODEL = _lore.OLLAMA_MODEL
-AUTO_CLIP_MIN_S = 6.0
-AUTO_CLIP_MAX_S = 45.0
-AUTO_ENERGY_TOP_N = 30        # candidate windows from the audio-energy pass
-AUTO_CATEGORIES = ["clutch", "funny", "rage", "story"]
+AUTO_CATEGORIES = ["clutch", "funny", "rage", "hype", "story"]
+
+# ============================================================================
+# Full-auto HIGHLIGHT DETECTION — the calibration surface.
+# These are deliberately exposed: the first runs on real VODs are a tuning pass.
+# Detection fuses three signals (audio energy + reaction keywords + an LLM judge)
+# into ranked candidate windows. Every threshold/weight/lexicon below is tunable.
+# ============================================================================
+
+# -- Audio-energy peaks (gameplay/effects.py provides the loudness envelope) --
+AUTO_ENERGY_WINDOW_S = 0.5      # RMS window for DETECTION (coarser than effects' 0.1)
+AUTO_ENERGY_K = 1.5             # peak threshold = rolling_median + K * rolling_std
+AUTO_ENERGY_ROLL_S = 30.0       # seconds; rolling-stats window (local normalisation,
+                                # so a loud match isn't drowned by a loud whole-VOD)
+AUTO_ENERGY_MIN_PROMINENCE = 0.15  # min (peak − local median), as a fraction of the
+                                   # video's max prominence (0..1); rejects small bumps
+AUTO_ENERGY_MIN_SPACING_S = 8.0    # peaks must be >= this far apart (no clustering)
+AUTO_ENERGY_MAX_ANCHORS = 60       # cap energy anchors before framing
+
+# -- Reaction-keyword lexicon (per category). ADD YOUR GROUP'S SLANG + GAMES. --
+# Substring match, case-insensitive, over per-speaker utterances. Multi-word
+# phrases are fine. A hit is an anchor carrying this category as a hint.
+AUTO_REACTION_LEXICON = {
+    "funny": ["lol", "lmao", "lmfao", "haha", "hahaha", "bro", "bruh", "dying",
+              "i'm dead", "im dead", "crying", "wheeze", "💀"],
+    "hype":  ["let's go", "lets go", "lets gooo", "no way", "no wayyy", "insane",
+              "actually insane", "crazy", "sheesh", "poggers", "pog", "w "],
+    "clutch": ["clutch", "1v2", "1v3", "1v4", "1v5", "ace", "got him", "got em",
+               "defuse", "down", "knifed", "last one"],
+    "rage":  ["are you kidding me", "kidding me", "no shot", "what the", "wtf",
+              "trash", "broken", "bullshit", "are you serious", "damn it", "rigged"],
+}
+AUTO_REACTION_DENSITY_CAP = 0.30   # hits/sec that maps to a reaction score of 1.0
+
+# -- Window framing (anchor -> clip window, snapped to transcript boundaries) --
+AUTO_CLIP_MIN_S = 15.0          # target clip length floor
+AUTO_CLIP_MAX_S = 45.0          # target clip length ceiling
+AUTO_LEAD_IN_S = 4.0            # seconds before the anchor (the set-up line)
+AUTO_LEAD_OUT_S = 7.0           # seconds after the anchor (the payoff / reaction)
+
+# -- LLM judge (chunked so a 60-min transcript is never sent in one call) --
+AUTO_LLM_CHUNK_S = 150.0        # ~2.5 min transcript chunks
+AUTO_LLM_CHUNK_OVERLAP_S = 20.0  # overlap so a moment on a boundary isn't split
+
+# -- Fuse + score weights (LLM-led). score is a weighted sum of 0..1 signals. --
+AUTO_W_LLM = 0.50               # LLM judge confidence
+AUTO_W_ENERGY = 0.25            # normalised audio-energy prominence
+AUTO_W_REACTION = 0.15          # reaction-keyword density
+AUTO_W_OVERLAP = 0.10           # multi-speaker banter factor (min(speakers,3)/3)
+AUTO_TOP_N = 15                 # cap on surviving candidates after dedupe
+
+# -- Long-video hardening (10GB RTX 3080) --
+AUTO_TRANSCRIBE_BATCH = 8       # whisperx batch for long videos (safe default)
+AUTO_TRANSCRIBE_BATCH_OOM = 4   # retry batch after a CUDA OOM (once)
+AUTO_MAX_MINUTES = 60           # warn (don't block) past this length
