@@ -801,14 +801,64 @@ def load_sfx_tab(name: str):
 
 # ------------------------------------------------------------------ UI -----
 
-def build_app() -> gr.Blocks:
-    with gr.Blocks(title="Shorts Pipeline") as demo:
-        gr.Markdown("# 🔥 Lore Shorts Studio\nScript → stills → motion → "
-                    "voice → captions → **your approval** → publish-ready.")
-        ep_state = gr.State("")
-        banner = gr.Markdown(status_banner(""))
+# Landing shell: the app opens on a landing screen with two entry cards that route
+# into one of the two pipelines (Shorts / Gaming). The wizard, gameplay tab, and
+# Settings are wrapped — unchanged — in visibility-toggled containers so they all
+# stay in one session and every existing handler keeps firing.
+_MODES = ("landing", "shorts", "gaming", "settings")
 
-        with gr.Tabs():
+
+def _route(target: str) -> tuple:
+    """Visibility updates for [landing, shorts, gaming, settings] — exactly one
+    container visible for `target`."""
+    return tuple(gr.update(visible=(m == target)) for m in _MODES)
+
+
+_LANDING_CSS = """
+.landing-wrap { max-width: 920px; margin: 0 auto; padding: 24px 8px; }
+.landing-wrap .brand-title { text-align: center; }
+.entry-card { border: 1px solid var(--border-color-primary);
+  border-radius: 16px; padding: 20px 22px; min-height: 188px;
+  background: var(--block-background-fill);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.entry-card:hover { transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); border-color: var(--color-accent); }
+.mode-header { align-items: center; gap: 8px; margin-bottom: 4px; }
+"""
+
+
+def build_app() -> gr.Blocks:
+    with gr.Blocks(title="Lore Shorts Studio") as demo:
+        ep_state = gr.State("")
+        prev_mode = gr.State("landing")   # which mode Settings' "Back" returns to
+
+        # ---- Landing (shown on startup) ----
+        with gr.Column(visible=True, elem_classes="landing-wrap",
+                       elem_id="mode-landing") as landing:
+            gr.Markdown("# 🎬 Lore Shorts Studio", elem_classes="brand-title")
+            gr.Markdown("### Choose a pipeline", elem_classes="brand-title")
+            with gr.Row(equal_height=True):
+                with gr.Group(elem_classes="entry-card"):
+                    gr.Markdown("## 🎬 Shorts Pipeline\nCinematic lore Shorts: "
+                                "script → stills → motion → voice → captions → "
+                                "approve.")
+                    shorts_card_btn = gr.Button("Open Shorts →", variant="primary")
+                with gr.Group(elem_classes="entry-card"):
+                    gr.Markdown("## 🎮 Gaming\nTurn a gameplay clip into a "
+                                "captioned 9:16 Short.")
+                    gaming_card_btn = gr.Button("Open Gaming →", variant="primary")
+            with gr.Row():
+                landing_settings_btn = gr.Button("⚙ Settings", scale=0)
+
+        # ---- Shorts (the lore wizard) ----
+        with gr.Column(visible=False, elem_id="mode-shorts") as shorts_view:
+          with gr.Row(elem_classes="mode-header"):
+              shorts_home_btn = gr.Button("← Home / Switch mode", scale=0)
+              shorts_settings_btn = gr.Button("⚙ Settings", scale=0)
+              gr.Markdown("### 🎬 Shorts Pipeline")
+          banner = gr.Markdown(status_banner(""))
+
+          with gr.Tabs():
             # ---------------------------------------------------- 1 Script
             with gr.Tab("1 · Script"):
                 with gr.Row():
@@ -1050,13 +1100,24 @@ def build_app() -> gr.Blocks:
                                         variant="primary")
                 approve_md = gr.Markdown("")
 
-            # ------------------------------------------------- Gameplay --
+        # ---- Gaming (the gameplay pipeline) ----
+        with gr.Column(visible=False, elem_id="mode-gaming") as gaming_view:
+          with gr.Row(elem_classes="mode-header"):
+              gaming_home_btn = gr.Button("← Home / Switch mode", scale=0)
+              gaming_settings_btn = gr.Button("⚙ Settings", scale=0)
+              gr.Markdown("### 🎮 Gaming")
+          with gr.Tabs():
             # Second, parallel pipeline (gameplay clips). Self-contained in
-            # gameplay/gui.py; the lore wizard above is untouched.
+            # gameplay/gui.py; the lore wizard is untouched.
             from gameplay.gui import build_gameplay_tab
             build_gameplay_tab()
 
-            # --------------------------------------------------- Settings
+        # ---- Settings (shared — reachable from both modes) ----
+        with gr.Column(visible=False, elem_id="mode-settings") as settings_view:
+          with gr.Row(elem_classes="mode-header"):
+              settings_back_btn = gr.Button("← Back", scale=0)
+              gr.Markdown("### ⚙ Settings")
+          with gr.Tabs():
             with gr.Tab("⚙ Settings"):
                 keys_md = gr.Markdown(_key_status())
                 with gr.Row():
@@ -1215,9 +1276,27 @@ def build_app() -> gr.Blocks:
 
         save_keys_btn.click(save_keys, [gemini_tb, eleven_tb],
                             [keys_md, gemini_tb, eleven_tb])
+
+        # ----------------------------------------------- landing / nav ----
+        # Visibility-only routing between the landing and the three containers.
+        # No pipeline state is touched, so switching modes preserves everything.
+        nav = [landing, shorts_view, gaming_view, settings_view]
+        shorts_card_btn.click(lambda: _route("shorts"), None, nav)
+        gaming_card_btn.click(lambda: _route("gaming"), None, nav)
+        shorts_home_btn.click(lambda: _route("landing"), None, nav)
+        gaming_home_btn.click(lambda: _route("landing"), None, nav)
+        # Settings remembers where it was opened from, so "← Back" returns there.
+        landing_settings_btn.click(lambda: "landing", None, prev_mode) \
+            .then(lambda: _route("settings"), None, nav)
+        shorts_settings_btn.click(lambda: "shorts", None, prev_mode) \
+            .then(lambda: _route("settings"), None, nav)
+        gaming_settings_btn.click(lambda: "gaming", None, prev_mode) \
+            .then(lambda: _route("settings"), None, nav)
+        settings_back_btn.click(lambda p: _route(p), prev_mode, nav)
     return demo
 
 
 if __name__ == "__main__":
     app = build_app()
-    app.queue().launch(inbrowser=True, show_error=True, theme=gr.themes.Soft())
+    app.queue().launch(inbrowser=True, show_error=True, theme=gr.themes.Soft(),
+                       css=_LANDING_CSS)
