@@ -21,11 +21,13 @@ Progress = Callable[[str], None]
 def cut_segment(video: str | Path, start: float, end: float, out: Path) -> Path:
     """Cut [start, end] at the source's NATIVE resolution (no scale/crop/pad), CFR so
     a later concat is seamless, keeping the first video+audio and dropping any stray
-    data/timecode track. Re-encoded with uniform params so segments concat cleanly."""
+    data/timecode track. Uses the shared quality-targeted encode (the cut is full-
+    auto's only/own quality-governing pass; the concat is a stream copy)."""
+    from gameplay import encode as enc
     _run(["ffmpeg", "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(video),
           "-map", "0:v:0", "-map", "0:a:0?", "-dn", "-map_metadata", "-1",
           "-fps_mode", "cfr",
-          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
+          *enc.final_args(),
           "-c:a", "aac", "-b:a", "192k", str(out)])
     return out
 
