@@ -257,9 +257,20 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
         _emit(progress, plan.warning)
     batch = int(batch_size or gconf.WHISPERX_BATCH)
     _emit(progress, f"Loading WhisperX ({plan.describe()}, batch={batch})...")
+    # Anti-hallucination ASR options (noisy gameplay audio). Passed at load time;
+    # fall back to a bare load if the installed whisperx rejects the kwarg.
+    asr_options = {
+        "condition_on_previous_text": gconf.WHISPERX_CONDITION_ON_PREVIOUS,
+        "no_speech_threshold": gconf.WHISPERX_NO_SPEECH_THRESHOLD,
+    }
     try:
-        model = whisperx.load_model(plan.model, plan.device,
-                                    compute_type=plan.compute_type)
+        try:
+            model = whisperx.load_model(plan.model, plan.device,
+                                        compute_type=plan.compute_type,
+                                        asr_options=asr_options)
+        except TypeError:        # older/other signature without asr_options
+            model = whisperx.load_model(plan.model, plan.device,
+                                        compute_type=plan.compute_type)
         audio = whisperx.load_audio(path)
         _emit(progress, "Transcribing...")
         result = _transcribe_with_oom_retry(model, audio, batch,
@@ -288,11 +299,13 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
     device_mod.free_vram()
 
     token = gconf.hf_token()
+    diarized_ran = False
     if diarize and token:
         _emit(progress, "Diarizing speakers (pyannote)...")
         try:
             turns = _diarize(audio, token, plan.device)
             result = assign_speakers(result, turns)
+            diarized_ran = True
             n = len({t[2] for t in turns})
             _emit(progress, f"Diarization: {n} speaker(s) over {len(turns)} turn(s).")
         except Exception as e:                   # noqa: BLE001 — degrade gracefully
@@ -304,10 +317,15 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
                         "(set HF_TOKEN in .env + accept the pyannote licence to "
                         "colour per speaker).")
 
-    transcript = from_whisperx(result)
+    transcript = from_whisperx(result, max_word_s=gconf.WHISPERX_MAX_WORD_S,
+                               diarized=diarized_ran)
     n = len(transcript.speakers)
-    _emit(progress, f"Done: {len(transcript.words)} words, "
-                    f"{'single speaker' if transcript.single_speaker else f'{n} speakers'}.")
+    if diarized_ran and transcript.single_speaker:
+        _emit(progress, f"Done: {len(transcript.words)} words. Diarization ran but "
+                        f"collapsed to one dominant speaker.")
+    else:
+        _emit(progress, f"Done: {len(transcript.words)} words, "
+              f"{'single speaker' if transcript.single_speaker else f'{n} speakers'}.")
     return transcript
 
 
