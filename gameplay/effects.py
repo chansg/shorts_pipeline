@@ -147,6 +147,7 @@ def apply_effects(src: str | Path, out: str | Path, enabled: list[str],
     If nothing is enabled or no beats are found, `out` is a straight copy so the
     pipeline can treat the effects stage uniformly. Idempotent."""
     from modules.assemble import _run
+    from gameplay import encode as enc
     src, out = Path(src), Path(out)
     beats = detect_beats(src) if beats is None else beats
     if out.exists():
@@ -154,8 +155,10 @@ def apply_effects(src: str | Path, out: str | Path, enabled: list[str],
     vf = build_effects_filter(beats, enabled, gconf.WIDTH, gconf.HEIGHT)
     cmd = ["ffmpeg", "-y", "-i", str(src)]
     if vf:
-        cmd += ["-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                "-preset", "medium", "-crf", "20", "-r", str(gconf.FPS)]
+        # Standalone effects pass is an intermediate (run_manual composes effects into
+        # the caption burn; this path is for direct/standalone use). Near-lossless so
+        # only a later final encode governs quality.
+        cmd += ["-vf", vf, *enc.intermediate_args()]
     else:
         cmd += ["-c:v", "copy"]      # nothing to do — straight passthrough
     cmd += ["-c:a", "copy"]          # gameplay audio is preserved untouched

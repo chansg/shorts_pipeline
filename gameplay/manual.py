@@ -22,6 +22,7 @@ from modules.karaoke_captions import CaptionStyle, build_ass
 from orchestrator.errors import FriendlyError, ensure_ffmpeg
 from gameplay import config as gconf
 from gameplay import effects as fx_mod
+from gameplay import encode as enc
 from gameplay import reframe as reframe_mod
 from gameplay.state import GameplayClip
 from gameplay.transcript import Transcript
@@ -37,6 +38,7 @@ class ManualOptions:
     caption_font: str = gconf.CAPTION_FONT
     caption_pos_y_frac: float = gconf.CAPTION_POS_Y_FRAC
     speaker_colors: dict[str, tuple[int, int, int]] = field(default_factory=dict)
+    reframe_mode: str = gconf.REFRAME_MODE                  # blur_pad | fit_crop | zoom_blur
 
 
 def caption_style(opts: ManualOptions) -> CaptionStyle:
@@ -64,19 +66,23 @@ def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path) 
     return ass_path
 
 
-def burn_captions(video: Path, ass: Path, out: Path) -> Path:
-    """Burn the .ass onto `video`, keeping the clip's own audio. Reuses the lore
-    pipeline's fontsdir trick: run from the .ass folder, pass the bare filename,
-    and give fontsdir as a relative (colon-free) path so the bundled font resolves
-    on Windows without a system install."""
+def burn_captions(video: Path, ass: Path, out: Path, *,
+                  effects_vf: str | None = None, final: bool = True) -> Path:
+    """Burn the .ass onto `video` (optionally chaining an `effects_vf` zoompan filter
+    BEFORE it, so effects + captions are ONE encode), keeping the clip's own audio.
+
+    Reuses the lore pipeline's fontsdir trick: run from the .ass folder, pass the bare
+    filename, and give fontsdir as a relative (colon-free) path so the bundled font
+    resolves on Windows without a system install. `final=True` uses the quality-
+    targeted final encode (CRF 18 + profile high + faststart); `final=False` uses a
+    near-lossless intermediate (when an overlay pass still follows)."""
     video, out = video.resolve(), out.resolve()
     fonts_rel = os.path.relpath(gconf.FONTS_DIR, ass.parent).replace("\\", "/")
-    cmd = ["ffmpeg", "-y", "-i", str(video),
-           "-vf", f"ass={ass.name}:fontsdir={fonts_rel}", "-map", "0:v"]
+    chain = ([effects_vf] if effects_vf else []) + [f"ass={ass.name}:fontsdir={fonts_rel}"]
+    cmd = ["ffmpeg", "-y", "-i", str(video), "-vf", ",".join(chain), "-map", "0:v"]
     if _has_audio(video):
         cmd += ["-map", "0:a", "-c:a", "copy"]
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium",
-            "-crf", "20", str(out)]
+    cmd += (enc.final_args() if final else enc.intermediate_args()) + [str(out)]
     _run(cmd, cwd=ass.parent)
     return out
 
@@ -102,7 +108,7 @@ def preview_captions(clip: GameplayClip, transcript: Transcript,
     _run(["ffmpeg", "-y", "-t", f"{seconds:.3f}", "-i", str(clip.reframed_path),
           "-c", "copy", str(preview_src)])
     write_captions(transcript, opts, preview_ass)
-    burn_captions(preview_src, preview_ass, preview_out)
+    burn_captions(preview_src, preview_ass, preview_out, final=False)  # fast preview
     return preview_out
 
 
@@ -119,40 +125,46 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
             "The transcript is empty — run Transcribe (and check the audio has "
             "speech) before building.")
 
-    # Opts-dependent outputs are always rebuilt; the blur-pad is cached unless force.
+    # Opts-dependent outputs are always rebuilt; the reframe is cached unless force.
     for p in (clip.fx_path, clip.captioned_path, clip.final_path, clip.ass_path):
         p.unlink(missing_ok=True)
     if force:
         clip.reframed_path.unlink(missing_ok=True)
 
-    yield {"msg": "1/4  Reframing to 9:16 (blur-pad)..."}
-    reframe_mod.reframe(src, clip.reframed_path)
-    stage_in = clip.reframed_path
+    has_overlay = bool(opts.overlay_name)
+    # Encode passes: the cached reframe (near-lossless intermediate) + ONE final
+    # encode (effects+captions composed), + an overlay encode only if an overlay is
+    # used. Down from up to four (reframe/effects/captions/overlay each re-encoded).
+    n_passes = 2 + (1 if has_overlay else 0)
 
+    yield {"msg": f"1/3  Reframing to 9:16 ({opts.reframe_mode})..."}
+    reframe_mod.reframe(src, clip.reframed_path, mode=opts.reframe_mode)
+
+    # Effects (zoompan) are composed into the caption burn as ONE pass, so loud-beat
+    # detection runs here but no separate effects encode happens.
+    effects_vf = None
     if opts.effects:
-        yield {"msg": f"2/4  Applying effects: {', '.join(opts.effects)} "
-                      f"(detecting loud beats)..."}
-        _, beats = fx_mod.apply_effects(stage_in, clip.fx_path, opts.effects)
-        yield {"msg": f"     {len(beats)} beat(s) detected."}
-        stage_in = clip.fx_path
+        beats = fx_mod.detect_beats(src)
+        effects_vf = fx_mod.build_effects_filter(beats, opts.effects,
+                                                 gconf.WIDTH, gconf.HEIGHT)
+        yield {"msg": f"2/3  Effects {', '.join(opts.effects)} + captions "
+                      f"({len(beats)} beat(s)) — one encode..."}
     else:
-        yield {"msg": "2/4  Effects: none."}
+        yield {"msg": "2/3  Burning captions (effects: none)..."}
 
-    yield {"msg": "3/4  Burning captions..."}
     write_captions(transcript, opts, clip.ass_path)
-    burn_captions(stage_in, clip.ass_path, clip.captioned_path)
-    stage_in = clip.captioned_path
+    # The caption burn is the FINAL encode unless an overlay pass still follows.
+    cap_out = clip.captioned_path if has_overlay else clip.final_path
+    burn_captions(clip.reframed_path, clip.ass_path, cap_out,
+                  effects_vf=effects_vf, final=not has_overlay)
 
-    if opts.overlay_name:
-        yield {"msg": f"4/4  Compositing overlay '{opts.overlay_name}'..."}
+    if has_overlay:
+        yield {"msg": f"3/3  Compositing overlay '{opts.overlay_name}' (final encode)..."}
         from gameplay import overlay as ov_mod
-        ov_mod.composite(stage_in, opts.overlay_name, clip.final_path,
+        ov_mod.composite(cap_out, opts.overlay_name, clip.final_path,
                          position=opts.overlay_position,
                          start=opts.overlay_start, duration=opts.overlay_duration)
-    else:
-        yield {"msg": "4/4  Overlay: none."}
-        _run(["ffmpeg", "-y", "-i", str(stage_in), "-c", "copy",
-              str(clip.final_path)])
 
-    yield {"msg": f"Done -> {clip.final_path}", "done": True,
-           "output": clip.final_path}
+    yield {"msg": f"Done -> {clip.final_path} "
+                  f"(CRF {gconf.OUTPUT_CRF}, {n_passes} encode pass(es)).",
+           "done": True, "output": clip.final_path}

@@ -111,10 +111,11 @@ def composite(base: str | Path, overlay_name: str, out: str | Path,
     graph = (f"{setpts}[0:v]{ov_label}overlay={x}:{y}{enable}:"
              f"eof_action=pass:format=auto[v]")
 
+    from gameplay import encode as enc
     cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", graph, "-map", "[v]"]
     if _has_audio(base):
         cmd += ["-map", "0:a", "-c:a", "copy"]
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium",
-            "-crf", "20", "-r", str(gconf.FPS), "-shortest", str(out)]
+    # Overlay is the LAST pass when used, so it's the quality-targeted final encode.
+    cmd += [*enc.final_args(), "-shortest", str(out)]
     _run(cmd)
     return out
