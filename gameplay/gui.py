@@ -2,12 +2,12 @@
 needs an import + one call inside its `gr.Tabs()` block (the lore wizard is
 untouched).
 
-Manual mode (fully working):
-  upload clip -> Transcribe -> editable transcript gate (text/speaker/timing +
-  speaker colours) -> reframe + caption + effects toggles + overlay picker ->
-  Build (streams) -> preview.
+Manual mode only: upload a pre-trimmed clip -> Transcribe -> editable transcript
+gate (text/speaker/timing + speaker colours) -> reframe + caption + effects toggles
++ overlay picker -> Build (streams) -> 9:16 preview.
 
-Full-auto mode lives under an "Experimental" accordion in the same tab.
+The experimental full-auto long-video processor lives in its own landing entry
+(fullauto/) and exports a 16:9 YouTube video — it is NOT part of this page.
 
 Streaming handlers update only their status Textbox while running (yielding
 gr.update() for other outputs), then a chained .then() populates the editor /
@@ -23,11 +23,10 @@ from orchestrator.errors import FriendlyError, friendly
 from gameplay import config as gconf
 from gameplay import editing as edit_mod
 from gameplay import manual as manual_mod
-from gameplay import autopipeline as ap_mod
 from gameplay import overlay as ov_mod
 from gameplay import transcribe as transcribe_mod
 from gameplay.manual import ManualOptions, run_manual
-from gameplay.state import AutoSession, GameplayClip, slugify
+from gameplay.state import GameplayClip, slugify
 from gameplay.transcript import Transcript
 
 _NONE = "(none)"
@@ -224,107 +223,6 @@ def _refresh_overlays():
     return gr.update(choices=[_NONE] + ov_mod.list_overlays())
 
 
-# ---- full-auto: detect -> review gallery -> load-into-manual / batch --------
-
-def _do_detect(video, backend, max_clips, diarize):
-    """Detect + rank candidates for a long video (no building). Streams the staged
-    progress, persists candidates + thumbnails for the review step."""
-    if not video:
-        raise gr.Error("Upload a long gameplay video first.")
-    captured: list[str] = []
-    try:
-        ap_mod.detect_candidates(
-            video, backend=backend, max_clips=int(max_clips), diarize=bool(diarize),
-            progress=lambda m: captured.append(m))
-    except FriendlyError as fe:
-        raise gr.Error(str(fe), duration=None)
-    except Exception as e:                       # noqa: BLE001
-        raise gr.Error(str(friendly(e)), duration=None)
-    yield "\n".join(captured)
-
-
-def _cand_label(i, c) -> str:
-    return (f"{i+1}. [{c.category}] {c.start:.0f}-{c.end:.0f}s · "
-            f"{c.score:.2f} · {c.caption or '(no caption)'}")
-
-
-def _load_candidates_ui(video):
-    """Populate the review gallery / table / selector from the persisted session."""
-    if not video:
-        return [], [], gr.update(choices=[], value=[])
-    session = AutoSession(Path(video).stem)
-    cands = ap_mod.load_candidates(session)
-    gallery, rows, labels = [], [], []
-    for i, c in enumerate(cands):
-        label = _cand_label(i, c)
-        labels.append(label)
-        rows.append([i + 1, c.category, f"{c.start:.0f}-{c.end:.0f}s",
-                     round(c.score, 2), c.caption])
-        thumb = session.preview_path(i)
-        if thumb.exists():
-            gallery.append((str(thumb), label))
-    return gallery, rows, gr.update(choices=labels, value=[])
-
-
-def _selected_indices(selected) -> list[int]:
-    out = []
-    for label in selected or []:
-        try:
-            out.append(int(str(label).split(".", 1)[0]) - 1)
-        except (ValueError, IndexError):
-            continue
-    return sorted(set(out))
-
-
-def _load_into_manual(video, selected):
-    """Load the FIRST selected candidate into the manual flow (cut clip + sliced
-    transcript), so the user QCs + builds it there."""
-    if not video:
-        raise gr.Error("Run Detect first.")
-    idxs = _selected_indices(selected)
-    if not idxs:
-        raise gr.Error("Tick a candidate to load into manual mode.")
-    session = AutoSession(Path(video).stem)
-    cands = ap_mod.load_candidates(session)
-    cand = cands[idxs[0]]
-    try:
-        clip, sub = ap_mod.load_candidate(session, video, cand)
-    except FriendlyError as fe:
-        raise gr.Error(str(fe), duration=None)
-    rows, spk_rows, note = _editor_payload(sub)
-    note = (f"Loaded full-auto candidate **[{cand.category}] "
-            f"{cand.start:.0f}-{cand.end:.0f}s** into manual mode. " + note)
-    return clip.name, str(clip.source_path()), rows, spk_rows, note
-
-
-def _batch_build(video, selected, effects, overlay_choice, pos, start, dur, font,
-                 posy, spk_rows):
-    """Optional: build all selected candidates with the current manual defaults."""
-    if not video:
-        raise gr.Error("Run Detect first.")
-    idxs = _selected_indices(selected)
-    if not idxs:
-        raise gr.Error("Tick candidates to batch-build.")
-    session = AutoSession(Path(video).stem)
-    cands = ap_mod.load_candidates(session)
-    opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows)
-    log, files = [], []
-    for n, i in enumerate(idxs):
-        c = cands[i]
-        tag = f"{n+1}/{len(idxs)} [{c.category}] {c.start:.0f}-{c.end:.0f}s"
-        log.append(f"Building {tag}...")
-        yield "\n".join(log), gr.update()
-        try:
-            out = ap_mod.build_candidate(session, video, c, opts)
-            if out:
-                files.append(str(out))
-            log.append(f"  done -> {out}")
-            yield "\n".join(log), files
-        except Exception as e:                   # noqa: BLE001 — contain per-candidate
-            log.append(f"  failed ({type(e).__name__}: {e}); skipped.")
-            yield "\n".join(log), gr.update()
-
-
 # ---- tab layout ------------------------------------------------------------
 
 def build_gameplay_tab() -> None:
@@ -419,43 +317,6 @@ def build_gameplay_tab() -> None:
         build_status = gr.Textbox(label="Build log", lines=5, interactive=False)
         result_video = gr.Video(label="Result (9:16 Short)")
 
-        # -- experimental full-auto: detect -> review -> load-into-manual --
-        with gr.Accordion("⚠ Experimental — full-auto (long video → review → "
-                          "load into manual)", open=False):
-            gr.Markdown(
-                "**Experimental.** Ingest a long (~1hr) video, auto-detect & "
-                "categorise highlights (audio-energy + LLM over the diarized "
-                "transcript). Review the candidates with previews, then **load a "
-                "pick into manual mode above** to QC its transcript and build it "
-                "(the human-in-the-loop path) — or batch-build selected with the "
-                "current settings. Compute-heavy; transcribe needs your GPU. "
-                "Detection is failure-contained.")
-            auto_video = gr.Video(label="Long gameplay video")
-            with gr.Row():
-                auto_diarize_cb = gr.Checkbox(
-                    value=True, label="Diarize (needs HF_TOKEN + accepted licence)")
-                auto_backend_dd = gr.Dropdown(
-                    choices=["ollama", "claude", "none"],
-                    value=gconf.AUTO_LLM_BACKEND,
-                    label="LLM backend for categorization")
-                auto_maxclips = gr.Slider(1, 12, value=8, step=1,
-                                          label="Max candidate clips")
-                auto_detect_btn = gr.Button("① Detect highlights", variant="primary")
-            auto_status = gr.Textbox(label="Full-auto log", lines=8,
-                                     interactive=False)
-            auto_gallery = gr.Gallery(label="Candidate previews", columns=4,
-                                      height=240, object_fit="contain")
-            auto_summary_df = gr.Dataframe(
-                headers=["#", "category", "window", "score", "caption"],
-                type="array", interactive=False, label="Candidates")
-            auto_select_cbg = gr.CheckboxGroup(
-                choices=[], label="Select candidates (by #)")
-            with gr.Row():
-                auto_load_btn = gr.Button("② Load selected into manual",
-                                          variant="primary")
-                auto_batch_btn = gr.Button("Batch-build selected (optional)")
-            auto_files = gr.Files(label="Batch-built candidate Shorts")
-
         # -- wiring --
         transcribe_btn.click(_set_clip_name, clip_video, clip_state) \
             .then(_do_transcribe, [clip_video, diarize_cb, clip_state],
@@ -487,23 +348,3 @@ def build_gameplay_tab() -> None:
                         font_dd, posy_sl]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
-
-        # full-auto: detect (streams) -> populate review gallery/table/selector
-        auto_detect_btn.click(
-            _do_detect,
-            [auto_video, auto_backend_dd, auto_maxclips, auto_diarize_cb],
-            auto_status) \
-            .then(_load_candidates_ui, auto_video,
-                  [auto_gallery, auto_summary_df, auto_select_cbg])
-
-        # load the first selected candidate INTO the manual flow (pre-filled)
-        auto_load_btn.click(
-            _load_into_manual, [auto_video, auto_select_cbg],
-            [clip_state, clip_video, transcript_df, speaker_df, editor_md])
-
-        # optional: batch-build all selected with the current manual settings
-        auto_batch_btn.click(
-            _batch_build,
-            [auto_video, auto_select_cbg, effects_cbg, overlay_dd, overlay_pos_dd,
-             overlay_start_n, overlay_dur_n, font_dd, posy_sl, speaker_df],
-            [auto_status, auto_files])
