@@ -84,3 +84,31 @@ def test_save_load_roundtrip(tmp_path):
 def test_speaker_color_map_normalises():
     m = speaker_color_map({"Chan": [255, 0, 0], "Sam": (0, 255, 0), "X": None})
     assert m == {"Chan": (255, 0, 0), "Sam": (0, 255, 0)}
+
+
+def test_clamp_long_words_kills_mega_token():
+    from gameplay.transcript import clamp_long_words
+    ws = [Word("hi", 0.0, 0.4, "S0"), Word("Naaaa", 3.1, 31.08, "S0")]
+    clamp_long_words(ws, 1.2)
+    assert ws[1].end == round(3.1 + 1.2, 3)          # 28s token clamped to 1.2s
+    assert ws[0].end == 0.4                            # short word untouched
+
+
+def test_from_whisperx_clamps_before_grid():
+    result = {"language": "en", "segments": [{"words": [
+        {"word": "Naaaa", "start": 3.1, "end": 31.08, "speaker": "S0"}]}]}
+    t = from_whisperx(result, max_word_s=1.2)
+    assert t.words[0].end - t.words[0].start <= 1.2 + 1e-6
+
+
+def test_from_whisperx_default_no_clamp_and_diarized_flag():
+    result = {"language": "en", "segments": [{"words": [
+        {"word": "x", "start": 0.0, "end": 5.0, "speaker": "S0"}]}]}
+    assert from_whisperx(result).words[0].end == 5.0   # default: no clamp
+    assert from_whisperx(result, diarized=True).diarized is True
+
+
+def test_diarized_persists_roundtrip(tmp_path):
+    t = Transcript([Word("a", 0.0, 0.4, "S0")], single_speaker=True, diarized=True)
+    t2 = Transcript.load(t.save(tmp_path / "t.json"))
+    assert t2.diarized is True

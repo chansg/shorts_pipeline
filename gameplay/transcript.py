@@ -27,9 +27,12 @@ class Transcript:
 
     `single_speaker` is True when diarization was skipped or found <=1 voice; in
     that case every word's speaker is None and captions use the style default
-    colour (matching the lore look)."""
+    colour (matching the lore look). `diarized` records whether diarization
+    actually RAN (so the editor can tell "no token" apart from "ran but collapsed
+    to one dominant speaker")."""
     words: list[Word] = field(default_factory=list)
     single_speaker: bool = False
+    diarized: bool = False
 
     # ---- speakers ----
 
@@ -67,12 +70,36 @@ class Transcript:
         return [[w.text, (w.speaker or ""), round(w.start, 2), round(w.end, 2)]
                 for w in self.words]
 
+    @staticmethod
+    def _normalise_grid(rows) -> list[list]:
+        """Coerce whatever the Gradio Dataframe hands us into a plain list-of-lists.
+
+        `type="array"` yields list-of-lists, but be robust to a pandas DataFrame
+        (older/other Gradio paths), a dict payload ({"data": [...]}), or a numpy
+        array — and NEVER raise (a truthiness check on a DataFrame would). This is
+        the seam where edited grid values become the build's transcript, so it must
+        not silently drop edits."""
+        if rows is None:
+            return []
+        # dict payload, e.g. {"headers": [...], "data": [[...], ...]}
+        if isinstance(rows, dict):
+            rows = rows.get("data", [])
+        # pandas DataFrame / numpy array -> list of lists (avoid ambiguous truthiness)
+        if hasattr(rows, "values") and hasattr(rows, "columns"):   # DataFrame
+            rows = rows.values.tolist()
+        elif hasattr(rows, "tolist") and not isinstance(rows, list):  # ndarray
+            rows = rows.tolist()
+        try:
+            return [list(r) for r in rows]
+        except TypeError:
+            return []
+
     @classmethod
     def from_rows(cls, rows, single_speaker: bool = False) -> "Transcript":
         """Rebuild from edited grid rows. Tolerant of blank/half-filled trailing
         rows the editor may add, and of out-of-order/garbled timing."""
         words: list[Word] = []
-        for row in rows or []:
+        for row in cls._normalise_grid(rows):
             row = list(row) + ["", "", None, None]
             text = str(row[0] or "").strip()
             if not text:
@@ -93,7 +120,7 @@ class Transcript:
     # ---- persistence (resumable cache) ----
 
     def to_dict(self) -> dict:
-        return {"single_speaker": self.single_speaker,
+        return {"single_speaker": self.single_speaker, "diarized": self.diarized,
                 "words": [vars(w) for w in self.words]}
 
     def save(self, path: str | Path) -> Path:
@@ -106,14 +133,30 @@ class Transcript:
     def from_dict(cls, d: dict) -> "Transcript":
         words = [Word(w.get("text", ""), float(w["start"]), float(w["end"]),
                       w.get("speaker")) for w in d.get("words", [])]
-        return cls(words=words, single_speaker=bool(d.get("single_speaker")))
+        return cls(words=words, single_speaker=bool(d.get("single_speaker")),
+                   diarized=bool(d.get("diarized")))
 
     @classmethod
     def load(cls, path: str | Path) -> "Transcript":
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def from_whisperx(result: dict) -> Transcript:
+def clamp_long_words(words: list[Word], max_dur: float) -> list[Word]:
+    """Clamp the displayed END of any word longer than `max_dur` to start+max_dur.
+
+    Noisy gameplay audio makes Whisper hallucinate a single token spanning tens of
+    seconds (e.g. "Naaaa…" 3.1s→31.08s, burned as a screen-wide "AAAA…" wall that
+    also overlaps every later word). Clamping here — before the editable grid — keeps
+    the word (the user can fix/delete it) but stops the wall. `max_dur <= 0` disables."""
+    if max_dur and max_dur > 0:
+        for w in words:
+            if w.end - w.start > max_dur:
+                w.end = round(w.start + max_dur, 3)
+    return words
+
+
+def from_whisperx(result: dict, max_word_s: float | None = None,
+                  diarized: bool = False) -> Transcript:
     """Adapt a WhisperX aligned (and optionally diarized) result into a Transcript.
 
     WhisperX yields result["segments"][i]["words"] with keys word/start/end and,
@@ -137,12 +180,15 @@ def from_whisperx(result: dict) -> Transcript:
             speaker = w.get("speaker", seg_speaker)
             words.append(Word(text, float(start), float(end), speaker))
             last_end = float(end)
+    # clamp hallucinated mega-tokens BEFORE the grid (default off if max_word_s None)
+    if max_word_s is not None:
+        clamp_long_words(words, max_word_s)
     distinct = {w.speaker for w in words if w.speaker}
     single = len(distinct) <= 1
     if single:                       # normalise to the no-colour default
         for w in words:
             w.speaker = None
-    return Transcript(words=words, single_speaker=single)
+    return Transcript(words=words, single_speaker=single, diarized=diarized)
 
 
 def speaker_color_map(rows_or_map) -> dict[str, tuple[int, int, int]]:

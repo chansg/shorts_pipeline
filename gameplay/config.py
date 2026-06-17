@@ -36,6 +36,13 @@ WHISPERX_COMPUTE_CUDA = "float16"  # cuda compute type ("int8" uses less VRAM)
 WHISPERX_COMPUTE_CPU = "int8"      # cpu fallback compute type
 DIARIZE_MIN_SPEAKERS = 1
 DIARIZE_MAX_SPEAKERS = 6           # 4-5 people expected; a little headroom
+# ASR anti-hallucination (noisy gameplay audio): don't let Whisper run away on its
+# own previous output, and require some confidence there's speech. Without these a
+# single token can balloon to tens of seconds (a screen-wide "AAAA…" wall).
+WHISPERX_CONDITION_ON_PREVIOUS = False
+WHISPERX_NO_SPEECH_THRESHOLD = 0.6
+# Hard clamp BEFORE the editable grid: split/clamp any word longer than this (s).
+WHISPERX_MAX_WORD_S = 1.2
 
 
 def hf_token() -> str | None:
@@ -56,6 +63,9 @@ CAPTION_FONTSIZE = _lore.CAPTION_AW_FONTSIZE
 # HUD. 0.78 drops captions into the lower blur band, off the action. GUI slider tunes it.
 CAPTION_POS_Y_FRAC = 0.78
 SPEAKER_PALETTE = list(DEFAULT_SPEAKER_PALETTE)  # offered in the transcript editor
+# Render-side defence in depth (independent of the ASR clamp above):
+CAPTION_MAX_EVENT_S = 1.2        # no single caption stays on screen longer than this
+CAPTION_MAX_LINE_CHARS = 12      # wrap/hard-split so no line exceeds the frame width
 
 # --- Effects (starter set; the registry in effects.py is built to extend) ---
 PUNCH_ZOOM_AMOUNT = 0.08    # 1.0 -> 1.08 push on a beat

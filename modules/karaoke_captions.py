@@ -78,6 +78,10 @@ class CaptionStyle:
     speaker_colors: dict[str, tuple[int, int, int]] = field(default_factory=dict)
     speaker_palette: list[tuple[int, int, int]] = field(
         default_factory=lambda: list(DEFAULT_SPEAKER_PALETTE))
+    # Render-side defence in depth (all default OFF -> lore output is unchanged):
+    max_event_s: float | None = None   # cap how long any one cue stays on screen
+    max_line_chars: int = 0            # wrap/hard-split so no line exceeds frame width
+    prevent_overlap: bool = False      # snap a cue's end to the next cue's start
 
 
 def _header(st: CaptionStyle) -> str:
@@ -115,9 +119,37 @@ def _resolve_speaker_color(st: CaptionStyle, speaker, assigned: dict) -> str | N
     return _ass_color(*assigned[speaker])
 
 
+def _wrap_text(text: str, max_chars: int) -> str:
+    """Wrap to <=max_chars per line at word boundaries, hard-splitting any single
+    token longer than the limit, so no line can exceed the frame width. Uses ASS
+    line breaks (\\N). No-op when max_chars<=0 (the lore path)."""
+    if max_chars <= 0:
+        return text
+    tokens: list[str] = []
+    for word in text.split():
+        while len(word) > max_chars:           # hard-split an over-long token
+            tokens.append(word[:max_chars])
+            word = word[max_chars:]
+        tokens.append(word)
+    lines: list[str] = []
+    cur = ""
+    for tok in tokens:
+        if not cur:
+            cur = tok
+        elif len(cur) + 1 + len(tok) <= max_chars:
+            cur += " " + tok
+        else:
+            lines.append(cur)
+            cur = tok
+    if cur:
+        lines.append(cur)
+    return "\\N".join(lines)
+
+
 def _cue_text(st: CaptionStyle, text: str, color: str | None = None) -> str:
     if st.uppercase:
         text = text.upper()
+    text = _wrap_text(text, st.max_line_chars)
     x = st.play_w // 2
     y = int(st.play_h * st.pos_y_frac)
     color_tag = f"\\c{color}&" if color else ""
@@ -157,14 +189,20 @@ def build_ass(words, style: CaptionStyle | None = None) -> str:
     for i, (text, start, end, speaker) in enumerate(cues):
         # extend to next cue's start so a single word stays up with no flicker,
         # unless the gap is too big (a long pause / cutaway) — then just hold briefly.
-        if st.gap_fill and i + 1 < len(cues):
-            next_start = cues[i + 1][1]
+        next_start = cues[i + 1][1] if i + 1 < len(cues) else None
+        if st.gap_fill and next_start is not None:
             if st.max_gap is not None and next_start - end > st.max_gap:
                 end = end + st.hold
+            elif st.prevent_overlap:
+                end = next_start            # active-word: show exactly until the next
             else:
                 end = max(end, next_start)
         if end - start < st.min_hold_s:
             end = start + st.min_hold_s
+        if st.max_event_s and end - start > st.max_event_s:
+            end = start + st.max_event_s    # no screen-wide "AAAA…" wall
+        if st.prevent_overlap and next_start is not None and next_start > start:
+            end = min(end, next_start)      # never overlap the next cue
         color = _resolve_speaker_color(st, speaker, assigned)
         lines.append(
             f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Pop,,0,0,0,,"
