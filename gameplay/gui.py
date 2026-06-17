@@ -149,14 +149,19 @@ def _do_transcribe(video, diarize, clip_name):
 
 def _editor_payload(t: Transcript):
     """(rows, speaker_rows, note) for the transcript editor from a Transcript."""
-    if t.single_speaker:
-        note = (f"**{len(t.words)} words**, single speaker (default colour). "
-                f"Set `HF_TOKEN` in .env + accept the pyannote licence and "
-                f"re-transcribe to colour per speaker.")
-    else:
+    if not t.single_speaker:
         note = (f"**{len(t.words)} words**, {len(t.speakers)} speakers. "
                 f"Rename speakers in the *speaker* column; recolour below. "
                 f"Edits here ARE the captions — fix any ASR errors now.")
+    elif t.diarized:
+        # diarisation RAN but only one voice dominated — not a token problem
+        note = (f"**{len(t.words)} words**. Diarisation ran but collapsed to one "
+                f"dominant speaker. If that's wrong, set the speaker per row in the "
+                f"grid, or re-transcribe. Edits here ARE the captions.")
+    else:
+        note = (f"**{len(t.words)} words**, single speaker (default colour). "
+                f"Set `HF_TOKEN` in .env + accept the pyannote licence and "
+                f"re-transcribe to colour per speaker. Edits here ARE the captions.")
     return t.to_rows(), _speaker_rows(t), note
 
 
@@ -191,8 +196,13 @@ def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
     if not clip.has_source():
         raise gr.Error("No source clip — upload and transcribe first.")
     transcript = Transcript.from_rows(rows)
+    if not transcript.words:
+        raise gr.Error("The transcript grid is empty — transcribe a clip (or add "
+                       "rows) before building.")
     opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows)
-    log: list[str] = []
+    # make the source of truth unambiguous: the build uses the CURRENT grid, edits included
+    log: list[str] = [f"Using your edited transcript ({len(transcript.words)} rows)."]
+    yield "\n".join(log)
     try:
         for ev in run_manual(clip, transcript, opts, force=True):
             log.append(ev["msg"])
@@ -334,7 +344,10 @@ def build_gameplay_tab() -> None:
                 diarize_cb = gr.Checkbox(
                     value=True,
                     label="Diarize speakers (needs HF_TOKEN; else single-speaker)")
-                transcribe_btn = gr.Button("① Transcribe", variant="primary")
+                transcribe_btn = gr.Button("① Transcribe / Re-transcribe",
+                                           variant="primary")
+                gr.Markdown("Runs WhisperX (the only ASR step) — **overwrites any "
+                            "grid edits**. Build never re-runs ASR.")
                 transcribe_status = gr.Textbox(label="Transcribe log", lines=4,
                                                interactive=False)
 
@@ -401,7 +414,8 @@ def build_gameplay_tab() -> None:
 
         # -- 4. build --
         with gr.Row():
-            build_btn = gr.Button("② Build Short", variant="primary")
+            build_btn = gr.Button("② Build from current transcript",
+                                   variant="primary")
         build_status = gr.Textbox(label="Build log", lines=5, interactive=False)
         result_video = gr.Video(label="Result (9:16 Short)")
 
