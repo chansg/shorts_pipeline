@@ -64,3 +64,39 @@ def test_prep_audio_name_does_not_shadow_source(tmp_path, monkeypatch):
     (clip.dir / "source.mp4").write_bytes(b"")          # the real video
     (clip.dir / tx.PREP_AUDIO_NAME).write_bytes(b"")    # our prepped work audio
     assert clip.source_path().name == "source.mp4"
+
+
+# ---- VAD merge-window (chunk_size) — the continuous-speech dropout fix ------
+
+class _StubModel:
+    """Records the kwargs passed to .transcribe; optionally OOMs on the first call."""
+    def __init__(self, oom_first=False):
+        self.calls = []
+        self._oom_first = oom_first
+
+    def transcribe(self, audio, batch_size=None, chunk_size=None):
+        self.calls.append((batch_size, chunk_size))
+        if self._oom_first and len(self.calls) == 1:
+            raise RuntimeError("CUDA failed with error out of memory")
+        return {"segments": [], "language": "en"}
+
+
+def test_transcribe_passes_chunk_size_to_model():
+    # The dropout fix: a small VAD-merge window must reach model.transcribe, or dense
+    # speech collapses to one giant window the model abandons after a few words.
+    m = _StubModel()
+    out = tx._transcribe_with_oom_retry(m, object(), 16, 4, None, 8)
+    assert m.calls == [(16, 8)]                  # batch_size + chunk_size both passed
+    assert out == {"segments": [], "language": "en"}
+
+
+def test_transcribe_oom_retry_keeps_chunk_size():
+    # The OOM retry drops batch_size but must KEEP the chunk_size window.
+    m = _StubModel(oom_first=True)
+    tx._transcribe_with_oom_retry(m, object(), 16, 4, None, 6)
+    assert m.calls == [(16, 6), (4, 6)]
+
+
+def test_chunk_size_default_is_small():
+    # Guard the default away from WhisperX's 30s (which caused the 26s->5 words bug).
+    assert 0 < gconf.WHISPERX_CHUNK_SIZE <= 15

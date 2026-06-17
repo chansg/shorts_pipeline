@@ -267,17 +267,22 @@ def _is_oom(e: Exception) -> bool:
 
 
 def _transcribe_with_oom_retry(model, audio, batch: int, oom_batch: int,
-                               progress: Progress | None):
+                               progress: Progress | None,
+                               chunk_size: int | None = None):
     """Run ASR; on a CUDA OOM, free VRAM and retry ONCE at a smaller batch with a
-    clear log (rather than crashing). A second OOM propagates to a friendly error."""
+    clear log (rather than crashing). A second OOM propagates to a friendly error.
+    `chunk_size` is the VAD-merge window (seconds) — small enough that dense
+    continuous speech is decoded in several passes instead of one giant window that
+    the model abandons after a few words (defaults to gconf.WHISPERX_CHUNK_SIZE)."""
+    cs = chunk_size if chunk_size is not None else gconf.WHISPERX_CHUNK_SIZE
     try:
-        return model.transcribe(audio, batch_size=batch)
+        return model.transcribe(audio, batch_size=batch, chunk_size=cs)
     except Exception as e:                       # noqa: BLE001
         if _is_oom(e) and oom_batch < batch:
             device_mod.free_vram()
             _emit(progress, f"⚠ CUDA OOM at batch={batch}; freed VRAM, retrying "
                             f"once at batch={oom_batch}...")
-            return model.transcribe(audio, batch_size=oom_batch)
+            return model.transcribe(audio, batch_size=oom_batch, chunk_size=cs)
         raise
 
 
@@ -357,13 +362,15 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
                         f"(high-pass {gconf.WHISPERX_AUDIO_HIGHPASS_HZ}Hz, "
                         f"loudnorm {'on' if gconf.WHISPERX_AUDIO_LOUDNORM else 'off'}).")
         _emit(progress, f"VAD: {gconf.WHISPERX_VAD_METHOD} on "
-                        f"(onset={gconf.WHISPERX_VAD_ONSET}, offset={gconf.WHISPERX_VAD_OFFSET}); "
+                        f"(onset={gconf.WHISPERX_VAD_ONSET}, offset={gconf.WHISPERX_VAD_OFFSET}, "
+                        f"chunk={gconf.WHISPERX_CHUNK_SIZE}s); "
                         f"repetition guard no_repeat_ngram={gconf.WHISPERX_NO_REPEAT_NGRAM_SIZE}, "
                         f"penalty={gconf.WHISPERX_REPETITION_PENALTY}.")
         audio = whisperx.load_audio(str(prepped))
         _emit(progress, "Transcribing...")
         result = _transcribe_with_oom_retry(model, audio, batch,
-                                            gconf.AUTO_TRANSCRIBE_BATCH_OOM, progress)
+                                            gconf.AUTO_TRANSCRIBE_BATCH_OOM, progress,
+                                            gconf.WHISPERX_CHUNK_SIZE)
     except Exception as e:                       # noqa: BLE001 — re-raise as friendly
         raise _friendly_transcribe_error(e)
     # release the ASR model's VRAM before the alignment model loads (10GB card)

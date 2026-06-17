@@ -59,6 +59,14 @@ WHISPERX_COMPRESSION_RATIO_THRESHOLD = 2.4  # batched no-op; sequential-path onl
 WHISPERX_VAD_METHOD = "pyannote"   # "pyannote" (default) | "silero"
 WHISPERX_VAD_ONSET = 0.50          # speech-start probability threshold (whisperx default 0.500)
 WHISPERX_VAD_OFFSET = 0.363        # speech-end probability threshold (whisperx default 0.363)
+# VAD merges contiguous speech into windows of this many seconds, each decoded in
+# ONE batched pass. WhisperX's default (30) is too coarse for dense gameplay chatter:
+# a long continuous-speech run becomes a single 30s window and the model emits a few
+# words then stops (end-of-text), silently dropping the rest — e.g. 26s of talking
+# transcribed as 5 words. A smaller window forces several independent decodes and
+# recovers the speech (measured on a real clip: 30s->5 words, 8s->41 words). Lower =
+# more coverage but more fragmentation; ~6-10 is the sweet spot for noisy game audio.
+WHISPERX_CHUNK_SIZE = 8
 
 # Audio prep before WhisperX: force a clean 16k-mono downmix and lift the voice over
 # game audio (better VAD + ASR SNR). whisperx.load_audio already downmixes to 16k

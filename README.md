@@ -195,9 +195,14 @@ of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
   temperature / compression-ratio / `condition_on_previous_text` knobs gate the
   *sequential* path only and are no-ops here — documented inline). These two are the
   real anti-loop levers.
-- **VAD** is always on; its sensitivity is exposed as `WHISPERX_VAD_ONSET` /
-  `WHISPERX_VAD_OFFSET` (lower onset = recover more speech, at the risk of decoding
-  loud non-speech).
+- **VAD merge window** — `WHISPERX_CHUNK_SIZE` (seconds) is the **biggest lever**
+  against dropout. WhisperX merges contiguous speech into windows decoded in one
+  batched pass; its default (30s) lets a long talking run become a single window the
+  model abandons after a few words (measured: 26s of chatter → **5 words**). A smaller
+  window (default **8s**) forces several independent decodes → **41 words** on the same
+  clip. Lower = more coverage, more fragmentation.
+- **VAD** sensitivity is exposed as `WHISPERX_VAD_ONSET` / `WHISPERX_VAD_OFFSET`
+  (lower onset = recover more speech, at the risk of decoding loud non-speech).
 - **Post-guard** — `WHISPERX_MAX_WORD_CHARS` repairs a repetition token (collapses
   4+ char runs) or drops it if still absurd, *before* the editable grid, so a
   300-char wall can never reach captions. `WHISPERX_MAX_WORD_S` still clamps duration.

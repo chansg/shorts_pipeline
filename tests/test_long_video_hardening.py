@@ -17,7 +17,7 @@ class _FakeModel:
         self.fail_batches = set(fail_batches)
         self.calls = []
 
-    def transcribe(self, audio, batch_size):
+    def transcribe(self, audio, batch_size, chunk_size=None):
         self.calls.append(batch_size)
         if batch_size in self.fail_batches:
             raise RuntimeError("CUDA out of memory. Tried to allocate ...")
@@ -48,7 +48,7 @@ def test_non_oom_error_not_retried(monkeypatch):
     monkeypatch.setattr(device_mod, "free_vram", lambda: None)
 
     class _Boom:
-        def transcribe(self, audio, batch_size):
+        def transcribe(self, audio, batch_size, chunk_size=None):
             raise ValueError("something else")
 
     with pytest.raises(ValueError, match="something else"):
