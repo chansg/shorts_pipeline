@@ -30,6 +30,11 @@ from gameplay.transcript import Transcript, from_whisperx
 
 Progress = Callable[[str], None]
 
+# Fixed name for the cleaned 16k-mono work audio, written into the clip dir. MUST
+# NOT match the `source.*` glob in state.GameplayClip.source_path, or reframe/build
+# would treat it as the source video. Leading underscore => sorts/reads as a work file.
+PREP_AUDIO_NAME = "_audio16k.wav"
+
 
 # ---- ingest -----------------------------------------------------------------
 
@@ -341,7 +346,11 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
         # Clean 16k-mono prep (downmix + high-pass + loudnorm) so VAD finds the
         # speech and ASR has SNR — then load_audio (a no-op resample) for the model.
         src_sr, src_ch = probe_audio(path)
-        prepped = prepare_audio(path, Path(path).with_suffix(".16k.wav"))
+        # Write next to the source under a FIXED name (PREP_AUDIO_NAME) that can't
+        # match the clip's `source.*` glob (state.GameplayClip.source_path) —
+        # otherwise the prepped wav is picked up as the "source" by reframe/build and
+        # re-prepped each run (source.16k.16k.wav…). Overwritten each run; no accumulation.
+        prepped = prepare_audio(path, Path(path).parent / PREP_AUDIO_NAME)
         out_sr, out_ch = probe_audio(prepped)
         _emit(progress, f"Audio: source {src_sr or '?'}Hz/{src_ch or '?'}ch → "
                         f"{out_sr or 16000}Hz/{'mono' if out_ch == 1 else f'{out_ch}ch'} "
