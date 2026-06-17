@@ -51,6 +51,10 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
         max_gap=0.8,    # clear a held word across a long pause (matches lore look)
         hold=0.4,
         speaker_colors=opts.speaker_colors or {},
+        # gameplay defence in depth (noisy ASR): never wall the screen or overlap
+        max_event_s=gconf.CAPTION_MAX_EVENT_S,
+        max_line_chars=gconf.CAPTION_MAX_LINE_CHARS,
+        prevent_overlap=True,
     )
 
 
