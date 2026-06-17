@@ -9,8 +9,13 @@ Kept free of the heavy WhisperX/torch import so it (and its tests) run with no G
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 4+ of the same character in a row — the signature of a Whisper repetition
+# collapse ("Naaaaaa…"). Real words almost never have a run this long.
+_CHAR_RUN = re.compile(r"(.)\1{3,}", re.UNICODE)
 
 
 @dataclass
@@ -155,8 +160,33 @@ def clamp_long_words(words: list[Word], max_dur: float) -> list[Word]:
     return words
 
 
+def sanitize_runaway_tokens(words: list[Word], max_chars: int) -> list[Word]:
+    """Repair or drop repetition-collapse tokens BEFORE the editable grid.
+
+    A noisy/music chunk can collapse into a single "word" of hundreds of repeated
+    characters ("Naaaaaa…"). `clamp_long_words` fixes such a token's DURATION but
+    leaves its TEXT — so a 300-char wall still reaches the grid/captions. This is
+    the text-side guard:
+
+      1. collapse any run of 4+ identical chars to one ("Naaaaaa" -> "Na"), which
+         repairs the common shout-collapse into a plausible, editable word;
+      2. if the repaired token is STILL longer than `max_chars`, it is genuine
+         garbage (not a real word) and the word is dropped entirely.
+
+    Well-formed words pass through unchanged. `max_chars <= 0` disables the drop
+    step (runs are still collapsed). Returns a NEW list (input left intact)."""
+    out: list[Word] = []
+    for w in words:
+        repaired = _CHAR_RUN.sub(lambda m: m.group(1), w.text)
+        if max_chars and max_chars > 0 and len(repaired) > max_chars:
+            continue  # still absurd after repair -> drop (can't reach captions)
+        out.append(Word(repaired, w.start, w.end, w.speaker) if repaired != w.text else w)
+    return out
+
+
 def from_whisperx(result: dict, max_word_s: float | None = None,
-                  diarized: bool = False) -> Transcript:
+                  diarized: bool = False,
+                  max_word_chars: int = 0) -> Transcript:
     """Adapt a WhisperX aligned (and optionally diarized) result into a Transcript.
 
     WhisperX yields result["segments"][i]["words"] with keys word/start/end and,
@@ -180,7 +210,10 @@ def from_whisperx(result: dict, max_word_s: float | None = None,
             speaker = w.get("speaker", seg_speaker)
             words.append(Word(text, float(start), float(end), speaker))
             last_end = float(end)
-    # clamp hallucinated mega-tokens BEFORE the grid (default off if max_word_s None)
+    # text-side guard first: repair/drop repetition-collapse tokens ("Naaaaaa…"),
+    # then clamp any remaining over-long DURATIONS — both BEFORE the editable grid.
+    if max_word_chars:
+        words = sanitize_runaway_tokens(words, max_word_chars)
     if max_word_s is not None:
         clamp_long_words(words, max_word_s)
     distinct = {w.speaker for w in words if w.speaker}

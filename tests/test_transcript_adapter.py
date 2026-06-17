@@ -112,3 +112,54 @@ def test_diarized_persists_roundtrip(tmp_path):
     t = Transcript([Word("a", 0.0, 0.4, "S0")], single_speaker=True, diarized=True)
     t2 = Transcript.load(t.save(tmp_path / "t.json"))
     assert t2.diarized is True
+
+
+# ---- repetition-collapse / runaway-token post-guard -------------------------
+
+def test_sanitize_collapses_char_runs_keeps_normal_words():
+    from gameplay.transcript import sanitize_runaway_tokens
+    ws = [Word("Naaaaaaaaaaaa", 3.1, 4.3, "S0"), Word("cool", 0.0, 0.4, "S0")]
+    out = sanitize_runaway_tokens(ws, max_chars=40)
+    assert out[0].text == "Na"        # run of a's collapsed to one
+    assert out[1].text == "cool"      # 'oo' (run of 2) untouched
+    assert out[1] is ws[1]            # well-formed word passed through unchanged (identity)
+
+
+def test_repetition_collapse_token_repaired_and_gap_survives():
+    # The reported failure: a 300-char "Naaaa…" token at 3.1–4.3s, a well-formed
+    # word before it, and a long gap to the next word at 32.23s. Through the adapter
+    # + post-guard the wall must NOT reach captions, real words pass unchanged, and
+    # the gap (real timing) is preserved.
+    runaway = "N" + "a" * 300
+    result = {"language": "en", "segments": [{"words": [
+        {"word": "go", "start": 0.0, "end": 0.4, "speaker": "S0"},
+        {"word": runaway, "start": 3.1, "end": 4.3, "speaker": "S0"},
+        {"word": "clutch", "start": 32.23, "end": 32.8, "speaker": "S0"},
+    ]}]}
+    t = from_whisperx(result, max_word_s=1.2, max_word_chars=40)
+    texts = [w.text for w in t.words]
+    assert all(len(x) <= 40 for x in texts)          # no 300-char wall reaches captions
+    assert "go" in texts and "clutch" in texts        # well-formed words survive
+    naa = next(w for w in t.words if w.text.startswith("N"))
+    assert naa.text == "Na"                            # collapsed, still editable
+    assert naa.end - naa.start <= 1.2 + 1e-6           # duration also clamped
+    # the real gap is untouched (3.1→4.3 word, then 32.23 word)
+    assert t.words[-1].start == 32.23
+
+
+def test_garbage_token_with_no_char_run_is_dropped():
+    # A long token with no 4+ char run can't be repaired -> dropped (never captions).
+    garbage = "abcdefghij" * 5                        # 50 chars, no repeats to collapse
+    result = {"language": "en", "segments": [{"words": [
+        {"word": "ok", "start": 0.0, "end": 0.3},
+        {"word": garbage, "start": 1.0, "end": 1.2}]}]}
+    t = from_whisperx(result, max_word_chars=40)
+    assert [w.text for w in t.words] == ["ok"]
+
+
+def test_post_guard_off_by_default_leaves_long_words():
+    # max_word_chars defaults to 0 (disabled) -> the lore path is unaffected.
+    runaway = "N" + "a" * 300
+    result = {"language": "en", "segments": [{"words": [
+        {"word": runaway, "start": 0.0, "end": 0.5}]}]}
+    assert from_whisperx(result).words[0].text == runaway
