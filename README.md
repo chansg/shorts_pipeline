@@ -178,6 +178,34 @@ missing. The pinned, tested stack is whisperx 3.8.6 / pyannote.audio 4.0.4 /
 torch 2.8.0. **The first real transcribe+diarize run is yours to execute** (needs
 your GPU, token, and accepted licence).
 
+### Noisy game audio (transcript quality)
+
+Loud game audio over voice chat used to break the transcript two ways: a **massive
+dropout** (whole speech regions missing) and a **repetition collapse** (one "word"
+of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
+`gameplay/transcribe.py` + `gameplay/config.py`:
+
+- **Clean 16k-mono prep** — WhisperX downmixes to 16k mono but applies no filtering,
+  so quiet voice stays buried. We add an explicit downmix + **high-pass**
+  (`WHISPERX_AUDIO_HIGHPASS_HZ`, cuts explosion/footstep rumble) + **loudnorm**
+  (`WHISPERX_AUDIO_LOUDNORM`, lifts the voice) so VAD finds the speech and ASR has
+  SNR. The transcribe log prints the source vs prepped sample-rate/channels.
+- **Repetition guard** — WhisperX runs *batched* inference, whose decode path honours
+  only `WHISPERX_NO_REPEAT_NGRAM_SIZE` / `WHISPERX_REPETITION_PENALTY` (the
+  temperature / compression-ratio / `condition_on_previous_text` knobs gate the
+  *sequential* path only and are no-ops here — documented inline). These two are the
+  real anti-loop levers.
+- **VAD** is always on; its sensitivity is exposed as `WHISPERX_VAD_ONSET` /
+  `WHISPERX_VAD_OFFSET` (lower onset = recover more speech, at the risk of decoding
+  loud non-speech).
+- **Post-guard** — `WHISPERX_MAX_WORD_CHARS` repairs a repetition token (collapses
+  4+ char runs) or drops it if still absurd, *before* the editable grid, so a
+  300-char wall can never reach captions. `WHISPERX_MAX_WORD_S` still clamps duration.
+
+**Success signal on a re-run:** the log shows `… → 16000Hz/mono`, `VAD: pyannote on`,
+a word count in a realistic range (dense chatter ⇒ well over 13 words for ~34s), and
+**no** multi-second single-letter token and **no** 20+ second gap.
+
 ### Overlays
 
 Like/subscribe assets live in `overlays/` — transparent `.png` or alpha video
