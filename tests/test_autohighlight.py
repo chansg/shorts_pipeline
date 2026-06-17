@@ -3,12 +3,12 @@ LLM), plus a mocked-LLM end-to-end that prints the dry-run candidate shape."""
 import numpy as np
 import pytest
 
-from gameplay import autohighlight as ah
+from fullauto import highlight as ah
 from gameplay import config as gconf
-from gameplay.autohighlight import (Anchor, Candidate, LLMMoment, chunk_transcript,
-                                    fuse_and_rank, frame_window, merge_windows,
-                                    parse_llm_moments, pick_energy_peaks,
-                                    scan_reactions)
+from fullauto.highlight import (Anchor, Candidate, LLMMoment, chunk_transcript,
+                                fuse_and_rank, frame_window, merge_windows,
+                                parse_llm_moments, pick_energy_peaks,
+                                scan_reactions)
 from gameplay.transcript import Transcript, Word
 
 
