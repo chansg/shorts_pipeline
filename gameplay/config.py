@@ -90,7 +90,28 @@ def hf_token() -> str | None:
     return tok.strip() if tok and tok.strip() else None
 
 
-# --- Reframe (9:16 blur-pad) ---
+# --- Output encode quality (shared final-encode helper, gameplay/encode.py) ---
+# The FINAL encode is constant-quality (CRF), not a fixed low bitrate. CRF 18 is
+# visually near-lossless for 1080x1920 high-motion gameplay and lands well above
+# 10 Mbps on its own (16 for more headroom). A slower preset is worth it — these
+# are short clips on a fast GPU box. Intermediates are near-lossless (CRF 14) so
+# only the final CRF governs quality (no compounding loss across passes).
+OUTPUT_CRF = 18              # final-encode constant-quality target (lower = better)
+OUTPUT_PRESET = "slow"       # final-encode x264 preset (slow/medium; short clips)
+OUTPUT_PROFILE = "high"      # h264 profile — phone/browser safe
+INTERMEDIATE_CRF = 14        # near-lossless intermediates (reframe, etc.)
+INTERMEDIATE_PRESET = "medium"
+
+# --- Reframe (9:16 layout) ---
+# How the 16:9 source is fit into 1080x1920:
+#   "blur_pad" (default) — full frame centred over a blurred fill (no crop, but a
+#                          ~16:9 strip carries the action; most pixels are blur).
+#   "fit_crop"           — scale to FILL the frame and crop the sides; gameplay fills
+#                          1080x1920 at full resolution (sharpest; loses side edges).
+#   "zoom_blur"          — blur-pad but the centred gameplay band scaled up by
+#                          ZOOM_BLUR_SCALE (bigger band, smaller blur bars).
+REFRAME_MODE = "blur_pad"    # "blur_pad" | "fit_crop" | "zoom_blur"
+ZOOM_BLUR_SCALE = 1.4        # zoom_blur: enlarge the centred gameplay band by this factor
 BLUR_RADIUS = 24        # boxblur luma radius for the top/bottom filler
 BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are clean
 
