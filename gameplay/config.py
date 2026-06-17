@@ -36,13 +36,43 @@ WHISPERX_COMPUTE_CUDA = "float16"  # cuda compute type ("int8" uses less VRAM)
 WHISPERX_COMPUTE_CPU = "int8"      # cpu fallback compute type
 DIARIZE_MIN_SPEAKERS = 1
 DIARIZE_MAX_SPEAKERS = 6           # 4-5 people expected; a little headroom
-# ASR anti-hallucination (noisy gameplay audio): don't let Whisper run away on its
-# own previous output, and require some confidence there's speech. Without these a
-# single token can balloon to tens of seconds (a screen-wide "AAAA…" wall).
-WHISPERX_CONDITION_ON_PREVIOUS = False
-WHISPERX_NO_SPEECH_THRESHOLD = 0.6
+# ASR anti-hallucination (noisy gameplay audio).
+#
+# IMPORTANT: WhisperX runs *batched* inference (asr.py:generate_segment_batched).
+# The batched decode path consumes ONLY beam_size / patience / length_penalty /
+# suppress_* / no_repeat_ngram_size / repetition_penalty. It does NOT use
+# temperature fallback, compression_ratio_threshold, log_prob_threshold,
+# no_speech_threshold, or condition_on_previous_text — those gate the *sequential*
+# whisper path only. So the real levers against a repetition collapse ("Naaaa…"
+# screen-wide wall) here are the two below; the others are kept for forward-compat
+# and the non-batched fallback but are documented as batched no-ops.
+WHISPERX_NO_REPEAT_NGRAM_SIZE = 3   # block any 3-gram from repeating (kills "na na na…")
+WHISPERX_REPETITION_PENALTY = 1.15  # >1 penalises repeats; the main anti-loop lever (batched)
+WHISPERX_CONDITION_ON_PREVIOUS = False  # batched no-op; correct intent, kept explicit
+WHISPERX_NO_SPEECH_THRESHOLD = 0.6      # batched no-op; sequential-path only
+WHISPERX_COMPRESSION_RATIO_THRESHOLD = 2.4  # batched no-op; sequential-path only
+
+# VAD (Voice Activity Detection) — WhisperX ALWAYS runs VAD and only transcribes the
+# speech regions it finds. If voice is buried under loud game audio, VAD can miss
+# whole regions (the "28s gap" dropout). Lower onset = more sensitive (recovers
+# missed speech) but risks decoding loud non-speech; tune against your clips.
+WHISPERX_VAD_METHOD = "pyannote"   # "pyannote" (default) | "silero"
+WHISPERX_VAD_ONSET = 0.50          # speech-start probability threshold (whisperx default 0.500)
+WHISPERX_VAD_OFFSET = 0.363        # speech-end probability threshold (whisperx default 0.363)
+
+# Audio prep before WhisperX: force a clean 16k-mono downmix and lift the voice over
+# game audio (better VAD + ASR SNR). whisperx.load_audio already downmixes to 16k
+# mono, but does NO filtering — these add a high-pass (cut explosion/footstep rumble)
+# and EBU loudness-normalise so quiet voice chat isn't swallowed.
+WHISPERX_AUDIO_HIGHPASS_HZ = 80    # high-pass cutoff (Hz); 0 disables
+WHISPERX_AUDIO_LOUDNORM = True     # EBU R128 loudnorm pass to raise quiet voice
+
 # Hard clamp BEFORE the editable grid: split/clamp any word longer than this (s).
 WHISPERX_MAX_WORD_S = 1.2
+# Post-guard against runaway tokens: drop/repair any single "word" longer than this
+# many characters, or any token that is one character repeated (e.g. "Naaaaaa…").
+# Last-line defence so a repetition-collapse token can never reach the grid/captions.
+WHISPERX_MAX_WORD_CHARS = 40
 
 
 def hf_token() -> str | None:
