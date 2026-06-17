@@ -218,6 +218,27 @@ Like/subscribe assets live in `overlays/` — transparent `.png` or alpha video
 (`like_subscribe_placeholder.png`) ships in the repo; drop your own in and click
 **↻ overlays**. Assets without an alpha channel are rejected with a clear error.
 
+### Output quality & layout
+
+Built Shorts are encoded for phone sharpness via one shared helper
+(`gameplay/encode.py`, used by manual + full-auto):
+
+- **Quality-targeted final encode** — `libx264` at constant quality **`OUTPUT_CRF`
+  (default 18)**, `OUTPUT_PRESET` (`slow`), H.264 High profile, `yuv420p`, and
+  `+faststart` for mobile streaming. CRF 18 lands well above 10 Mbps on motion content
+  by itself (set 16 for more headroom).
+- **No compounding loss** — a clip now goes through **2 encodes** (a cached
+  near-lossless reframe at `INTERMEDIATE_CRF` 14 + one final encode; +1 only if a
+  like/subscribe overlay is used), down from up to four. Effects + captions are
+  composed into a single pass. The build log reports the pass count.
+- **Layout modes** (`REFRAME_MODE`, also a GUI dropdown) reclaim the bitrate the
+  blur-pad spends on blurred bars:
+  - `blur_pad` *(default)* — full frame centred over a blurred fill (no crop).
+  - `fit_crop` — scale to fill 1080×1920 and crop the sides; the gameplay fills the
+    whole frame at full resolution (**sharpest**; loses horizontal edges).
+  - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`
+    (bigger band, thinner bars).
+
 ### Captions / colours
 
 Captions reuse `modules/karaoke_captions` — the same active-word renderer as the

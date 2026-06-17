@@ -173,7 +173,8 @@ def _load_editor(clip_name):
     return _editor_payload(Transcript.load(clip.transcript_path))
 
 
-def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows):
+def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
+                reframe_mode=None):
     overlay_name = None if overlay_choice in (None, "", _NONE) else overlay_choice
     return ManualOptions(
         effects=list(effects or []),
@@ -184,11 +185,12 @@ def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows):
         caption_font=font,
         caption_pos_y_frac=float(posy),
         speaker_colors=_parse_speaker_rows(spk_rows),
+        reframe_mode=reframe_mode or gconf.REFRAME_MODE,
     )
 
 
 def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
-              dur, font, posy):
+              dur, font, posy, reframe_mode):
     if not clip_name:
         raise gr.Error("Transcribe a clip first.")
     clip = GameplayClip(clip_name)
@@ -198,7 +200,8 @@ def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
     if not transcript.words:
         raise gr.Error("The transcript grid is empty — transcribe a clip (or add "
                        "rows) before building.")
-    opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows)
+    opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
+                       reframe_mode)
     # make the source of truth unambiguous: the build uses the CURRENT grid, edits included
     log: list[str] = [f"Using your edited transcript ({len(transcript.words)} rows)."]
     yield "\n".join(log)
@@ -309,6 +312,12 @@ def build_gameplay_tab() -> None:
             overlay_dur_n = gr.Number(value=gconf.OVERLAY_DEFAULT_DURATION,
                                       label="Overlay duration (s, 0 = whole clip)")
             refresh_ov_btn = gr.Button("↻ overlays")
+        with gr.Row():
+            reframe_mode_dd = gr.Dropdown(
+                choices=[("Blur-pad (full frame, blurred bars)", "blur_pad"),
+                         ("Fit & crop (fills frame, sharpest)", "fit_crop"),
+                         ("Zoom blur-pad (bigger gameplay band)", "zoom_blur")],
+                value=gconf.REFRAME_MODE, label="Layout (9:16 reframe)")
 
         # -- 4. build --
         with gr.Row():
@@ -345,6 +354,6 @@ def build_gameplay_tab() -> None:
 
         build_inputs = [clip_state, transcript_df, speaker_df, effects_cbg,
                         overlay_dd, overlay_pos_dd, overlay_start_n, overlay_dur_n,
-                        font_dd, posy_sl]
+                        font_dd, posy_sl, reframe_mode_dd]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
