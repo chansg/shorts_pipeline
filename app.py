@@ -805,12 +805,12 @@ def load_sfx_tab(name: str):
 # into one of the two pipelines (Shorts / Gaming). The wizard, gameplay tab, and
 # Settings are wrapped — unchanged — in visibility-toggled containers so they all
 # stay in one session and every existing handler keeps firing.
-_MODES = ("landing", "shorts", "gaming", "settings")
+_MODES = ("landing", "shorts", "gaming", "fullauto", "settings")
 
 
 def _route(target: str) -> tuple:
-    """Visibility updates for [landing, shorts, gaming, settings] — exactly one
-    container visible for `target`."""
+    """Visibility updates for [landing, shorts, gaming, fullauto, settings] — exactly
+    one container visible for `target`."""
     return tuple(gr.update(visible=(m == target)) for m in _MODES)
 
 
@@ -823,6 +823,16 @@ _LANDING_CSS = """
   transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
 .entry-card:hover { transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(0,0,0,.12); border-color: var(--color-accent); }
+/* Experimental card: muted, dashed accent + badge so it doesn't read as a
+   finished, equal-status pipeline next to the two production cards. */
+.entry-card.experimental { border-style: dashed; opacity: .92;
+  background: var(--block-background-fill);
+  border-color: var(--border-color-accent, var(--border-color-primary)); }
+.entry-card.experimental:hover { border-color: var(--color-accent); opacity: 1; }
+.exp-badge { display: inline-block; font-size: .72em; font-weight: 700;
+  letter-spacing: .06em; padding: 2px 8px; border-radius: 999px;
+  background: var(--color-accent-soft, rgba(255,170,0,.18));
+  border: 1px solid var(--color-accent, #d98a00); color: var(--body-text-color); }
 .mode-header { align-items: center; gap: 8px; margin-bottom: 4px; }
 """
 
@@ -844,9 +854,17 @@ def build_app() -> gr.Blocks:
                                 "approve.")
                     shorts_card_btn = gr.Button("Open Shorts →", variant="primary")
                 with gr.Group(elem_classes="entry-card"):
-                    gr.Markdown("## 🎮 Gaming\nTurn a gameplay clip into a "
-                                "captioned 9:16 Short.")
+                    gr.Markdown("## 🎮 Gaming\nTurn a pre-trimmed gameplay clip into "
+                                "a captioned 9:16 Short.")
                     gaming_card_btn = gr.Button("Open Gaming →", variant="primary")
+                with gr.Group(elem_classes="entry-card experimental"):
+                    gr.Markdown(
+                        "## ⚗ Full-Auto Experiment <span class='exp-badge'>"
+                        "EXPERIMENTAL</span>\nDrop in raw YouTube footage or long "
+                        "gameplay; auto-find, categorise and cut highlights into a "
+                        "**16:9 YouTube video**.")
+                    fullauto_card_btn = gr.Button("Open Full-Auto →",
+                                                  variant="secondary")
             with gr.Row():
                 landing_settings_btn = gr.Button("⚙ Settings", scale=0)
 
@@ -1112,7 +1130,19 @@ def build_app() -> gr.Blocks:
             from gameplay.gui import build_gameplay_tab
             build_gameplay_tab()
 
-        # ---- Settings (shared — reachable from both modes) ----
+        # ---- Full-Auto Experiment (its own mode; 16:9 YouTube output) ----
+        with gr.Column(visible=False, elem_id="mode-fullauto") as fullauto_view:
+          with gr.Row(elem_classes="mode-header"):
+              fullauto_home_btn = gr.Button("← Home / Switch mode", scale=0)
+              fullauto_settings_btn = gr.Button("⚙ Settings", scale=0)
+              gr.Markdown("### ⚗ Full-Auto Experiment")
+          with gr.Tabs():
+            # Experimental long-form processor — its own package; exports a 16:9
+            # YouTube video and never touches the 9:16 Shorts backend.
+            from fullauto.gui import build_fullauto_view
+            build_fullauto_view()
+
+        # ---- Settings (shared — reachable from all modes) ----
         with gr.Column(visible=False, elem_id="mode-settings") as settings_view:
           with gr.Row(elem_classes="mode-header"):
               settings_back_btn = gr.Button("← Back", scale=0)
@@ -1280,17 +1310,21 @@ def build_app() -> gr.Blocks:
         # ----------------------------------------------- landing / nav ----
         # Visibility-only routing between the landing and the three containers.
         # No pipeline state is touched, so switching modes preserves everything.
-        nav = [landing, shorts_view, gaming_view, settings_view]
+        nav = [landing, shorts_view, gaming_view, fullauto_view, settings_view]
         shorts_card_btn.click(lambda: _route("shorts"), None, nav)
         gaming_card_btn.click(lambda: _route("gaming"), None, nav)
+        fullauto_card_btn.click(lambda: _route("fullauto"), None, nav)
         shorts_home_btn.click(lambda: _route("landing"), None, nav)
         gaming_home_btn.click(lambda: _route("landing"), None, nav)
+        fullauto_home_btn.click(lambda: _route("landing"), None, nav)
         # Settings remembers where it was opened from, so "← Back" returns there.
         landing_settings_btn.click(lambda: "landing", None, prev_mode) \
             .then(lambda: _route("settings"), None, nav)
         shorts_settings_btn.click(lambda: "shorts", None, prev_mode) \
             .then(lambda: _route("settings"), None, nav)
         gaming_settings_btn.click(lambda: "gaming", None, prev_mode) \
+            .then(lambda: _route("settings"), None, nav)
+        fullauto_settings_btn.click(lambda: "fullauto", None, prev_mode) \
             .then(lambda: _route("settings"), None, nav)
         settings_back_btn.click(lambda p: _route(p), prev_mode, nav)
     return demo
