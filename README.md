@@ -221,10 +221,17 @@ drive per-speaker colour (explicit hex wins; otherwise a 6-colour palette is
 auto-assigned in order of appearance). The bundled **Anton** font is used the same
 way (via `fontsdir`).
 
-### Full-auto (experimental) — review-first
+## Full-Auto Experiment (its own landing entry — 16:9 YouTube output)
 
-Under the **⚠ Experimental** accordion, a long video becomes a *reviewable* set of
-candidates rather than an unattended export:
+The experimental long-form processor is its **own card on the landing screen**
+(marked ⚗ EXPERIMENTAL), separate from Gaming. Its output is a **standard 16:9
+YouTube video**, not a 9:16 Short — which is why it lives outside the Gaming Shorts
+section. It lives in its own package (`fullauto/`) and **never calls the 9:16 Shorts
+backend** (blur-pad reframe, like/subscribe overlay, karaoke captioner, vertical
+export). It still reuses the shared, aspect-agnostic infra in `gameplay/`
+(transcription, config, the audio-energy envelope).
+
+A long video becomes a *reviewable* set of candidates rather than an unattended export:
 
 1. **① Detect highlights** — transcribe + diarize the long video (staged progress;
    GPU-gated), then a **fused detector** finds & categorises candidates: audio-energy
@@ -233,15 +240,18 @@ candidates rather than an unattended export:
    caption. No building yet.
 2. **Review gallery** — candidates appear as preview thumbnails + a table; tick the
    ones worth keeping.
-3. **② Load selected into manual** — the first ticked candidate is cut and its
-   transcript sliced, then **loaded into the manual flow above** so you QC the
-   transcript and build it with per-clip control (the human-in-the-loop path).
-   Or **Batch-build selected** to render them all with the current settings.
+3. **② Build selected → 16:9 YouTube video** — the ticked highlights are cut at the
+   source's **native resolution** and assembled into one landscape video
+   (`fullauto/export.py`). No reframe, overlay, or karaoke captions.
 
-Building always reuses the manual backend (no duplicate render path). Compute-heavy
-and GPU-gated; detection is failure-contained (a bad LLM chunk, a CUDA OOM, or zero
-candidates each degrade gracefully); the LLM backend reuses `REWRITE_BACKEND`
-(ollama/claude). Isolated from manual mode and cannot affect it.
+> **Captions on the YouTube cut are an open question.** The per-speaker karaoke style
+> is a Shorts aesthetic, so full-auto ships the 16:9 video *without* it for now; a
+> `TODO(16:9 captions)` hook in `fullauto/export.py` marks where optional landscape
+> captioning could plug in later.
+
+Compute-heavy and GPU-gated; detection is failure-contained (a bad LLM chunk, a CUDA
+OOM, or zero candidates each degrade gracefully); the LLM backend reuses
+`REWRITE_BACKEND` (ollama/claude). Isolated from manual mode and cannot affect it.
 
 **Long videos (1–60 min) on a 10GB card.** The ASR model's VRAM is released before
 the alignment model loads, and again before diarization, so the card never holds two
