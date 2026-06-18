@@ -153,8 +153,24 @@ def _do_transcribe(video, diarize, clip_name):
         raise gr.Error(str(friendly(e)), duration=None)
 
 
+def _swatches_md(spk_rows) -> str:
+    """Inline speaker→colour chips so the mapping is visible while editing."""
+    chips = []
+    for row in spk_rows or []:
+        row = list(row) + ["", ""]
+        name = str(row[0] or "").strip()
+        if not name:
+            continue
+        hexv = str(row[1] or "").strip() or "#888888"
+        chips.append(
+            f"<span style='display:inline-block;padding:1px 8px;margin:2px;"
+            f"border-radius:6px;background:{hexv};color:#000;font-weight:600'>"
+            f"{name}</span>")
+    return ("**Speaker colours:** " + " ".join(chips)) if chips else ""
+
+
 def _editor_payload(t: Transcript):
-    """(rows, speaker_rows, note) for the transcript editor from a Transcript."""
+    """(rows, speaker_rows, note, swatch_md) for the transcript editor."""
     if not t.single_speaker:
         note = (f"**{len(t.words)} words**, {len(t.speakers)} speakers. "
                 f"Rename speakers in the *speaker* column; recolour below. "
@@ -168,20 +184,26 @@ def _editor_payload(t: Transcript):
         note = (f"**{len(t.words)} words**, single speaker (default colour). "
                 f"Set `HF_TOKEN` in .env + accept the pyannote licence and "
                 f"re-transcribe to colour per speaker. Edits here ARE the captions.")
-    return t.to_rows(), _speaker_rows(t), note
+    n_cen = sum(1 for w in t.words if w.censor)
+    if n_cen:
+        note += f" 🔇 {n_cen} word(s) flagged for censor."
+    spk_rows = _speaker_rows(t)
+    return t.to_rows(), spk_rows, note, _swatches_md(spk_rows)
 
 
 def _load_editor(clip_name):
+    empty = ([], [], "Transcribe a clip to populate the transcript editor.", "")
     if not clip_name:
-        return [], [], "Transcribe a clip to populate the transcript editor."
+        return empty
     clip = GameplayClip(clip_name)
     if not clip.has_transcript():
-        return [], [], "No transcript yet — run Transcribe."
+        return ([], [], "No transcript yet — run Transcribe.", "")
     return _editor_payload(Transcript.load(clip.transcript_path))
 
 
 def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
-                reframe_mode=None):
+                reframe_mode=None, x_off=None, y_off=None, fill_frac=None,
+                censor=None, censor_audio_mode=None):
     overlay_name = None if overlay_choice in (None, "", _NONE) else overlay_choice
     return ManualOptions(
         effects=list(effects or []),
@@ -193,11 +215,17 @@ def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
         caption_pos_y_frac=float(posy),
         speaker_colors=_parse_speaker_rows(spk_rows),
         reframe_mode=reframe_mode or gconf.REFRAME_MODE,
+        crop_x_offset=gconf.REFRAME_CROP_X_OFFSET if x_off is None else float(x_off),
+        crop_y_offset=gconf.REFRAME_CROP_Y_OFFSET if y_off is None else float(y_off),
+        fill_fraction=gconf.REFRAME_FILL_FRACTION if fill_frac is None else float(fill_frac),
+        censor=censor or "both",
+        censor_audio_mode=censor_audio_mode or gconf.CENSOR_AUDIO_MODE,
     )
 
 
 def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
-              dur, font, posy, reframe_mode):
+              dur, font, posy, reframe_mode, x_off, y_off, fill_frac,
+              censor, censor_audio_mode):
     if not clip_name:
         raise gr.Error("Transcribe a clip first.")
     clip = GameplayClip(clip_name)
@@ -208,7 +236,7 @@ def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
         raise gr.Error("The transcript grid is empty — transcribe a clip (or add "
                        "rows) before building.")
     opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
-                       reframe_mode)
+                       reframe_mode, x_off, y_off, fill_frac, censor, censor_audio_mode)
     # make the source of truth unambiguous: the build uses the CURRENT grid, edits included
     log: list[str] = [f"Using your edited transcript ({len(transcript.words)} rows)."]
     yield "\n".join(log)
@@ -262,9 +290,14 @@ def build_gameplay_tab() -> None:
         # -- 2. transcript gate --
         editor_md = gr.Markdown("Transcribe a clip to populate the transcript editor.")
         transcript_df = gr.Dataframe(
-            headers=Transcript.HEADERS, datatype=["str", "str", "number", "number"],
+            headers=Transcript.HEADERS,          # text, speaker, start, end, censor
+            datatype=["str", "str", "number", "number", "bool"],
             type="array", interactive=True, label="Transcript (editable)",
             row_count=(1, "dynamic"))
+        gr.Markdown("Click a cell to edit. The **censor** checkbox flags a word for "
+                    "the bleep + caption mask — tick to censor, untick a false "
+                    "positive. `start`/`end` are seconds.")
+        speaker_swatch_md = gr.Markdown()        # inline speaker→colour chips
         speaker_df = gr.Dataframe(
             headers=["speaker", "color (hex)"], datatype=["str", "str"],
             type="array", interactive=True, row_count=(1, "dynamic"),
@@ -306,8 +339,8 @@ def build_gameplay_tab() -> None:
             font_dd = gr.Dropdown(choices=["Anton", "Arial"],
                                   value=gconf.CAPTION_FONT, label="Caption font")
             posy_sl = gr.Slider(0.3, 0.9, value=gconf.CAPTION_POS_Y_FRAC, step=0.01,
-                                label="Caption Y (higher = lower; 0.78 keeps it in "
-                                      "the blur band, off the HUD)")
+                                label="Caption Y (higher = lower; 0.82 reads on the "
+                                      "fill layout, clear of the overlay)")
         with gr.Row():
             overlay_dd = gr.Dropdown(choices=[_NONE] + ov_mod.list_overlays(),
                                      value=_NONE, label="Like/subscribe overlay")
@@ -321,10 +354,27 @@ def build_gameplay_tab() -> None:
             refresh_ov_btn = gr.Button("↻ overlays")
         with gr.Row():
             reframe_mode_dd = gr.Dropdown(
-                choices=[("Blur-pad (full frame, blurred bars)", "blur_pad"),
-                         ("Fit & crop (fills frame, sharpest)", "fit_crop"),
+                choices=[("Fill (gameplay fills frame — recommended)", "fill"),
+                         ("Fit & crop (fill, centred)", "fit_crop"),
+                         ("Blur-pad (full frame, blurred bars)", "blur_pad"),
                          ("Zoom blur-pad (bigger gameplay band)", "zoom_blur")],
                 value=gconf.REFRAME_MODE, label="Layout (9:16 reframe)")
+            cropx_sl = gr.Slider(0.0, 1.0, value=gconf.REFRAME_CROP_X_OFFSET, step=0.05,
+                                 label="Fill crop X (0=left, 0.5=centre, 1=right)")
+            cropy_sl = gr.Slider(0.0, 1.0, value=gconf.REFRAME_CROP_Y_OFFSET, step=0.05,
+                                 label="Fill crop Y (0=top, 1=bottom)")
+            fillfrac_sl = gr.Slider(1.0, 2.0, value=gconf.REFRAME_FILL_FRACTION,
+                                    step=0.05, label="Fill zoom (1.0 = just fills)")
+        with gr.Row():
+            censor_dd = gr.Dropdown(
+                choices=[("Bleep audio + mask caption", "both"),
+                         ("Audio only", "audio"), ("Caption only", "caption"),
+                         ("Off", "off")],
+                value=("both" if gconf.CENSOR_ENABLED else "off"),
+                label="Profanity censor")
+            censor_mode_dd = gr.Dropdown(
+                choices=["bleep", "mute", "duck"], value=gconf.CENSOR_AUDIO_MODE,
+                label="Censor audio mode")
 
         # -- 4. build --
         with gr.Row():
@@ -338,7 +388,9 @@ def build_gameplay_tab() -> None:
             .then(_do_transcribe, [clip_video, diarize_cb, clip_state],
                   transcribe_status) \
             .then(_load_editor, clip_state,
-                  [transcript_df, speaker_df, editor_md])
+                  [transcript_df, speaker_df, editor_md, speaker_swatch_md])
+        # keep the inline colour swatches in sync as the user edits the colour grid
+        speaker_df.change(_swatches_md, speaker_df, speaker_swatch_md)
 
         # transcript bulk-edit wiring (each returns updated grid rows + a status)
         edit_assign_btn.click(_edit_assign,
@@ -361,6 +413,7 @@ def build_gameplay_tab() -> None:
 
         build_inputs = [clip_state, transcript_df, speaker_df, effects_cbg,
                         overlay_dd, overlay_pos_dd, overlay_start_n, overlay_dur_n,
-                        font_dd, posy_sl, reframe_mode_dd]
+                        font_dd, posy_sl, reframe_mode_dd, cropx_sl, cropy_sl,
+                        fillfrac_sl, censor_dd, censor_mode_dd]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
