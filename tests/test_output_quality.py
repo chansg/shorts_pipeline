@@ -60,8 +60,19 @@ def test_reframe_filter_modes_and_default():
     assert reframe_mod.reframe_filter("bogus", 1080, 1920) == blur
 
 
-def test_default_reframe_mode_is_blur_pad():
-    assert gconf.REFRAME_MODE == "blur_pad"
+def test_fill_layout_offsets_shift_the_crop():
+    centre = reframe_mod.reframe_filter("fill", 1080, 1920, x_off=0.5)
+    left = reframe_mod.reframe_filter("fill", 1080, 1920, x_off=0.0)
+    right = reframe_mod.reframe_filter("fill", 1080, 1920, x_off=1.0)
+    assert "crop=1080:1920" in centre and "boxblur" not in centre
+    assert "(iw-1080)*0.0" in left and "(iw-1080)*1.0" in right
+    assert left != right                                   # offset changes the crop
+
+
+def test_default_reframe_mode_is_fill():
+    # v3: fill is the recommended default (gameplay fills the frame); blur_pad stays.
+    assert gconf.REFRAME_MODE == "fill"
+    assert "blur_pad" in reframe_mod.MODES
 
 
 # ---- encode count (no GPU; record ffmpeg invocations) ----------------------

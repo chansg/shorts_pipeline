@@ -23,8 +23,8 @@ def test_parse_row_span_forms():
 def test_assign_speaker_multi_row():
     out = assign_speaker(_rows(), "1-2", "Chan")
     assert [r[1] for r in out] == ["Chan", "Chan", "S1", "S1"]
-    # contract intact: still 4 cols, times unchanged
-    assert out[0] == ["hey", "Chan", 0.0, 0.4]
+    # contract intact: 5 cols (text,speaker,start,end,censor), times unchanged
+    assert out[0] == ["hey", "Chan", 0.0, 0.4, False]
 
 
 def test_find_replace_counts_and_case():
@@ -44,19 +44,28 @@ def test_find_replace_whole_word():
 def test_merge_rows():
     out = merge_rows(_rows(), "1-2")
     assert len(out) == 3
-    assert out[0] == ["hey jet", "S0", 0.0, 0.8]     # joined, span min..max
+    assert out[0] == ["hey jet", "S0", 0.0, 0.8, False]   # joined, span min..max
     assert out[1][0] == "clutch"
 
 
 def test_split_row_prorates_time():
     out = split_row([["nice shot man", "S0", 0.0, 3.0]], 1)   # 3 words -> k=1
     assert len(out) == 2
-    assert out[0] == ["nice", "S0", 0.0, 1.0]
-    assert out[1] == ["shot man", "S0", 1.0, 3.0]
+    assert out[0] == ["nice", "S0", 0.0, 1.0, False]
+    assert out[1] == ["shot man", "S0", 1.0, 3.0, False]
 
 
 def test_split_single_word_is_noop():
-    assert split_row([["gg", "S0", 0.0, 1.0]], 1) == [["gg", "S0", 0.0, 1.0]]
+    assert split_row([["gg", "S0", 0.0, 1.0]], 1) == [["gg", "S0", 0.0, 1.0, False]]
+
+
+def test_edits_preserve_censor_flag():
+    # the censor flag (col 5) must survive speaker-assign, merge and split.
+    rows = [["damn", "S0", 0.0, 0.4, True], ["it", "S0", 0.4, 0.8, False]]
+    assert assign_speaker(rows, "1", "Chan")[0][4] is True
+    assert merge_rows(rows, "1-2")[0][4] is True             # censor if any part was
+    split = split_row([["damn it", "S0", 0.0, 1.0, True]], 1)
+    assert split[0][4] is True and split[1][4] is True       # both halves inherit
 
 
 def test_edits_feed_build_ass_contract():

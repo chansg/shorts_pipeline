@@ -7,7 +7,8 @@ import pytest
 from gameplay.transcript import Transcript, Word
 
 
-_ROWS = [["BRO", "SPEAKER_01", 6.0, 6.4], ["six", "SPEAKER_00", 6.4, 6.9]]
+_ROWS = [["BRO", "SPEAKER_01", 6.0, 6.4, False],
+         ["six", "SPEAKER_00", 6.4, 6.9, False]]   # text,speaker,start,end,censor
 
 
 def test_from_rows_list_of_lists():

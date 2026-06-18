@@ -134,11 +134,13 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    large-v2; CPU → a smaller model** with a loud warning (see Setup). No token /
    one voice → single-speaker.
 3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
-   (`SPEAKER_00` → "Chan") and pick their colours. *These rows are the captions.*
-   The **Bulk edits & caption preview** panel adds: multi-row speaker reassignment
-   (fix a stretch the diariser mislabelled), find/replace (a misheard name, fixed
-   once), merge/split rows, and a **Re-apply captions** preview that re-renders
-   just the caption track — no re-transcription.
+   (`SPEAKER_00` → "Chan") and pick their colours (shown as inline swatches).
+   *These rows are the captions.* Each row also has a **censor** checkbox
+   (auto-ticked from the word-list — see Profanity censor). The **Bulk edits &
+   caption preview** panel adds: multi-row speaker reassignment (fix a stretch the
+   diariser mislabelled), find/replace (a misheard name, fixed once), merge/split
+   rows, and a **Re-apply captions** preview that re-renders just the caption track
+   — no re-transcription.
 4. Choose **effects** (punch-zoom / shake, driven off the audio-energy envelope),
    a **caption** font/position (default `0.78` sits in the lower blur band, off the
    HUD), and a **like/subscribe overlay** (asset, position, start, duration).
@@ -237,11 +239,36 @@ Built Shorts are encoded for phone sharpness via one shared helper
   composed into a single pass. The build log reports the pass count.
 - **Layout modes** (`REFRAME_MODE`, also a GUI dropdown) reclaim the bitrate the
   blur-pad spends on blurred bars:
-  - `blur_pad` *(default)* — full frame centred over a blurred fill (no crop).
-  - `fit_crop` — scale to fill 1080×1920 and crop the sides; the gameplay fills the
-    whole frame at full resolution (**sharpest**; loses horizontal edges).
-  - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`
-    (bigger band, thinner bars).
+  - `fill` *(default, recommended)* — cover + crop so the gameplay fills the whole
+    1080×1920 at full resolution (**sharpest**, no wasted blur). Loses the far
+    horizontal edges; bias the crop with `REFRAME_CROP_X_OFFSET` (0=left, 0.5=centre,
+    1=right) — e.g. nudge to keep the ARAM minimap. `REFRAME_CROP_Y_OFFSET` and
+    `REFRAME_FILL_FRACTION` (zoom past cover) tune it; all three are GUI sliders.
+  - `fit_crop` — `fill` at fraction 1.0, centred.
+  - `blur_pad` — full frame centred over a blurred fill (no crop; the old default).
+  - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`.
+
+  With `fill`, captions default to `CAPTION_POS_Y_FRAC` 0.82 — a readable lower band
+  that clears the bottom-centre like/subscribe overlay.
+
+### Profanity censor
+
+Curse words are bleeped in the audio **and** masked in the caption, driven off one
+editable word-list (`gameplay/censor.py` + `gameplay/config.py`) and the WhisperX word
+spans — so audio and caption censor the same moment. **On by default.**
+
+- **Word-list** `CENSOR_WORDLIST` + **allow-list** `CENSOR_ALLOWLIST`. Matching is
+  **whole-word**, case-insensitive (never substring), so "Shaco", "assassin",
+  "Cassiopeia" never trip. Add your group's slang to the word-list.
+- **Audio** `CENSOR_AUDIO_MODE`: `bleep` (1 kHz tone, default — reads as intentional),
+  `mute`, or `duck`. Applied in the *same* final encode (no extra pass); for full-auto
+  it's applied per cut window (audio-only — no captions there).
+- **Caption** `CENSOR_CAPTION_STYLE`: `stars` (`f***`) or `block` (`[bleep]`).
+- **Toggle** per build in the GUI: bleep+mask / audio-only / caption-only / off.
+- **Editor control:** every transcript row has a **censor** checkbox — auto-ticked from
+  the word-list, untick a false positive or tick a word to censor manually. Adjacent
+  hits merge into one span; a flagged word with no timestamp is masked in the caption
+  but skipped for audio (logged).
 
 ### Captions / colours
 

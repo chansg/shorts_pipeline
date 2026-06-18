@@ -55,7 +55,7 @@ def test_rows_roundtrip_and_rename():
     t = Transcript([Word("hi", 0.0, 0.4, "SPEAKER_00"),
                     Word("yo", 0.4, 0.8, "SPEAKER_01")])
     rows = t.to_rows()
-    assert rows[0] == ["hi", "SPEAKER_00", 0.0, 0.4]
+    assert rows[0] == ["hi", "SPEAKER_00", 0.0, 0.4, False]   # +censor flag column
     t2 = Transcript.from_rows(rows)
     assert t2.to_tuples() == t.to_tuples()
     t2.rename_speaker("SPEAKER_00", "Chan")
