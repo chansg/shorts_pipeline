@@ -24,6 +24,14 @@ class Word:
     start: float
     end: float
     speaker: str | None = None
+    censor: bool = False           # profanity censor will bleep audio + mask caption
+
+
+def _truthy(v) -> bool:
+    """Coerce a grid cell (bool / "✓" / "true" / 1 / "") to a censor flag."""
+    if isinstance(v, bool):
+        return v
+    return str(v or "").strip().lower() in ("✓", "true", "1", "yes", "y", "x")
 
 
 @dataclass
@@ -58,22 +66,37 @@ class Transcript:
 
     # ---- caption adapter ----
 
-    def to_tuples(self) -> list[tuple]:
+    def to_tuples(self, mask: bool = False, mask_style: str | None = None
+                  ) -> list[tuple]:
         """Emit the list `build_ass` consumes. 4-tuples when any speaker label is
         present (drives per-speaker colour); plain 3-tuples in the single-speaker
-        case (so the renderer uses its default fill — identical to the lore path)."""
+        case (so the renderer uses its default fill — identical to the lore path).
+
+        With `mask=True`, censored words' TEXT is replaced by the masked form (e.g.
+        f***), keeping the caption in sync with the audio bleep."""
+        def _text(w):
+            if mask and w.censor:
+                from gameplay import censor
+                return censor.mask_text(w.text, mask_style)
+            return w.text
         any_speaker = any(w.speaker for w in self.words)
         if any_speaker and not self.single_speaker:
-            return [(w.text, w.start, w.end, w.speaker) for w in self.words]
-        return [(w.text, w.start, w.end) for w in self.words]
+            return [(_text(w), w.start, w.end, w.speaker) for w in self.words]
+        return [(_text(w), w.start, w.end) for w in self.words]
+
+    def censor_spans(self) -> list[tuple[float, float]]:
+        """`(start, end)` for every flagged word with a usable timestamp — the audio
+        censor's hit spans (a word with no real timestamp is skipped here)."""
+        return [(w.start, w.end) for w in self.words
+                if w.censor and w.end > w.start]
 
     # ---- editable grid (Gradio Dataframe) ----
 
-    HEADERS = ["text", "speaker", "start", "end"]
+    HEADERS = ["text", "speaker", "start", "end", "censor"]
 
     def to_rows(self) -> list[list]:
-        return [[w.text, (w.speaker or ""), round(w.start, 2), round(w.end, 2)]
-                for w in self.words]
+        return [[w.text, (w.speaker or ""), round(w.start, 2), round(w.end, 2),
+                 bool(w.censor)] for w in self.words]
 
     @staticmethod
     def _normalise_grid(rows) -> list[list]:
@@ -105,7 +128,7 @@ class Transcript:
         rows the editor may add, and of out-of-order/garbled timing."""
         words: list[Word] = []
         for row in cls._normalise_grid(rows):
-            row = list(row) + ["", "", None, None]
+            row = list(row) + ["", "", None, None, False]
             text = str(row[0] or "").strip()
             if not text:
                 continue
@@ -117,7 +140,7 @@ class Transcript:
                 continue
             if end < start:
                 start, end = end, start
-            words.append(Word(text, start, end, speaker))
+            words.append(Word(text, start, end, speaker, _truthy(row[4])))
         words.sort(key=lambda w: w.start)
         has_speaker = any(w.speaker for w in words)
         return cls(words=words, single_speaker=single_speaker or not has_speaker)
@@ -137,7 +160,8 @@ class Transcript:
     @classmethod
     def from_dict(cls, d: dict) -> "Transcript":
         words = [Word(w.get("text", ""), float(w["start"]), float(w["end"]),
-                      w.get("speaker")) for w in d.get("words", [])]
+                      w.get("speaker"), bool(w.get("censor", False)))
+                 for w in d.get("words", [])]
         return cls(words=words, single_speaker=bool(d.get("single_speaker")),
                    diarized=bool(d.get("diarized")))
 
@@ -221,6 +245,13 @@ def from_whisperx(result: dict, max_word_s: float | None = None,
     if single:                       # normalise to the no-colour default
         for w in words:
             w.speaker = None
+    # Auto-flag profanity so the editor shows the censor hits up front (the user can
+    # toggle any row). Off when the censor feature is disabled.
+    from gameplay import config as gconf
+    if getattr(gconf, "CENSOR_ENABLED", False):
+        from gameplay import censor
+        for w in words:
+            w.censor = censor.is_censored(w.text)
     return Transcript(words=words, single_speaker=single, diarized=diarized)
 
 

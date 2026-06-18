@@ -18,24 +18,43 @@ from modules.assemble import _run
 Progress = Callable[[str], None]
 
 
-def cut_segment(video: str | Path, start: float, end: float, out: Path) -> Path:
+def cut_segment(video: str | Path, start: float, end: float, out: Path,
+                audio_graph: str | None = None) -> Path:
     """Cut [start, end] at the source's NATIVE resolution (no scale/crop/pad), CFR so
     a later concat is seamless, keeping the first video+audio and dropping any stray
     data/timecode track. Uses the shared quality-targeted encode (the cut is full-
-    auto's only/own quality-governing pass; the concat is a stream copy)."""
+    auto's only/own quality-governing pass; the concat is a stream copy).
+
+    `audio_graph` (from gameplay.censor, spans rebased to this window) censors the
+    audio in the same pass — full-auto has no captions, so this is audio-only."""
     from gameplay import encode as enc
-    _run(["ffmpeg", "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(video),
-          "-map", "0:v:0", "-map", "0:a:0?", "-dn", "-map_metadata", "-1",
-          "-fps_mode", "cfr",
-          *enc.final_args(),
-          "-c:a", "aac", "-b:a", "192k", str(out)])
+    cmd = ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(video),
+           "-dn", "-map_metadata", "-1", "-fps_mode", "cfr", *enc.final_args()]
+    if audio_graph:
+        cmd += ["-filter_complex", audio_graph, "-map", "0:v:0", "-map", "[a]"]
+    else:
+        cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+    cmd += ["-c:a", "aac", "-b:a", "192k", str(out)]
+    _run(cmd)
     return out
 
 
+def _window_audio_graph(censor_spans, cstart: float, cend: float):
+    """Rebase global censor spans into a cut window [cstart,cend] (local 0-based) and
+    build the audio filtergraph for that segment, or None if no hit falls inside."""
+    if not censor_spans:
+        return None
+    from gameplay import censor as cmod
+    local = [(max(gs, cstart) - cstart, min(ge, cend) - cstart)
+             for gs, ge in censor_spans if ge > cstart and gs < cend]
+    return cmod.audio_graph(local, max(0.0, cend - cstart)) if local else None
+
+
 def export_youtube(video: str | Path, candidates, out_path: str | Path,
-                   progress: Progress | None = None) -> Path:
+                   progress: Progress | None = None, censor_spans=None) -> Path:
     """Assemble the candidate windows into one 16:9 YouTube video at native
     resolution. `candidates` are objects/tuples exposing .start/.end (or [0]/[1]).
+    `censor_spans` (global `(start,end)` profanity hits) are bleeped per window.
     Returns `out_path`."""
     video, out_path = Path(video), Path(out_path)
     emit = (lambda m: progress(m)) if progress else (lambda m: None)
@@ -55,7 +74,9 @@ def export_youtube(video: str | Path, candidates, out_path: str | Path,
     segs: list[Path] = []
     for i, (start, end) in enumerate(spans):
         emit(f"Cutting segment {i + 1}/{len(spans)} ({start:.0f}-{end:.0f}s)...")
-        segs.append(cut_segment(video, start, end, work / f"_yt_seg_{i:03d}.mp4"))
+        ag = _window_audio_graph(censor_spans, start, end)
+        segs.append(cut_segment(video, start, end, work / f"_yt_seg_{i:03d}.mp4",
+                                audio_graph=ag))
 
     if len(segs) == 1:
         emit("Single segment — finalising 16:9 video...")

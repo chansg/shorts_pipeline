@@ -17,10 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-from modules.assemble import _run, _has_audio
+from modules.assemble import _run, _has_audio, _probe_duration
 from modules.karaoke_captions import CaptionStyle, build_ass
 from orchestrator.errors import FriendlyError, ensure_ffmpeg
 from gameplay import config as gconf
+from gameplay import censor as censor_mod
 from gameplay import effects as fx_mod
 from gameplay import encode as enc
 from gameplay import reframe as reframe_mod
@@ -38,7 +39,20 @@ class ManualOptions:
     caption_font: str = gconf.CAPTION_FONT
     caption_pos_y_frac: float = gconf.CAPTION_POS_Y_FRAC
     speaker_colors: dict[str, tuple[int, int, int]] = field(default_factory=dict)
-    reframe_mode: str = gconf.REFRAME_MODE                  # blur_pad | fit_crop | zoom_blur
+    reframe_mode: str = gconf.REFRAME_MODE                  # fill | fit_crop | blur_pad | zoom_blur
+    crop_x_offset: float = gconf.REFRAME_CROP_X_OFFSET      # fill: horizontal crop bias (0..1)
+    crop_y_offset: float = gconf.REFRAME_CROP_Y_OFFSET      # fill: vertical crop bias (0..1)
+    fill_fraction: float = gconf.REFRAME_FILL_FRACTION      # fill: zoom past cover (>=1.0)
+    censor: str = "both"          # "both" | "audio" | "caption" | "off"
+    censor_audio_mode: str = gconf.CENSOR_AUDIO_MODE        # bleep | mute | duck
+
+
+def _censor_audio(opts: "ManualOptions") -> bool:
+    return opts.censor in ("both", "audio")
+
+
+def _censor_caption(opts: "ManualOptions") -> bool:
+    return opts.censor in ("both", "caption")
 
 
 def caption_style(opts: ManualOptions) -> CaptionStyle:
@@ -61,13 +75,15 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
 
 
 def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path) -> Path:
-    ass_path.write_text(build_ass(transcript.to_tuples(), caption_style(opts)),
-                        encoding="utf-8")
+    ass_path.write_text(
+        build_ass(transcript.to_tuples(mask=_censor_caption(opts)), caption_style(opts)),
+        encoding="utf-8")
     return ass_path
 
 
 def burn_captions(video: Path, ass: Path, out: Path, *,
-                  effects_vf: str | None = None, final: bool = True) -> Path:
+                  effects_vf: str | None = None, final: bool = True,
+                  audio_graph: str | None = None) -> Path:
     """Burn the .ass onto `video` (optionally chaining an `effects_vf` zoompan filter
     BEFORE it, so effects + captions are ONE encode), keeping the clip's own audio.
 
@@ -75,14 +91,26 @@ def burn_captions(video: Path, ass: Path, out: Path, *,
     filename, and give fontsdir as a relative (colon-free) path so the bundled font
     resolves on Windows without a system install. `final=True` uses the quality-
     targeted final encode (CRF 18 + profile high + faststart); `final=False` uses a
-    near-lossless intermediate (when an overlay pass still follows)."""
+    near-lossless intermediate (when an overlay pass still follows).
+
+    `audio_graph` (from gameplay.censor) censors the audio over the hit spans in this
+    SAME pass — no extra encode. When set, video + audio are composed in one
+    filter_complex; otherwise the audio is stream-copied (lossless)."""
     video, out = video.resolve(), out.resolve()
     fonts_rel = os.path.relpath(gconf.FONTS_DIR, ass.parent).replace("\\", "/")
-    chain = ([effects_vf] if effects_vf else []) + [f"ass={ass.name}:fontsdir={fonts_rel}"]
-    cmd = ["ffmpeg", "-y", "-i", str(video), "-vf", ",".join(chain), "-map", "0:v"]
-    if _has_audio(video):
-        cmd += ["-map", "0:a", "-c:a", "copy"]
-    cmd += (enc.final_args() if final else enc.intermediate_args()) + [str(out)]
+    vchain = ",".join(([effects_vf] if effects_vf else [])
+                      + [f"ass={ass.name}:fontsdir={fonts_rel}"])
+    enc_args = enc.final_args() if final else enc.intermediate_args()
+    if audio_graph and _has_audio(video):
+        cmd = ["ffmpeg", "-y", "-i", str(video),
+               "-filter_complex", f"[0:v]{vchain}[v];{audio_graph}",
+               "-map", "[v]", "-map", "[a]",
+               *enc_args, "-c:a", "aac", "-b:a", "192k", str(out)]
+    else:
+        cmd = ["ffmpeg", "-y", "-i", str(video), "-vf", vchain, "-map", "0:v"]
+        if _has_audio(video):
+            cmd += ["-map", "0:a", "-c:a", "copy"]
+        cmd += [*enc_args, str(out)]
     _run(cmd, cwd=ass.parent)
     return out
 
@@ -138,7 +166,9 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
     n_passes = 2 + (1 if has_overlay else 0)
 
     yield {"msg": f"1/3  Reframing to 9:16 ({opts.reframe_mode})..."}
-    reframe_mod.reframe(src, clip.reframed_path, mode=opts.reframe_mode)
+    reframe_mod.reframe(src, clip.reframed_path, mode=opts.reframe_mode,
+                        x_off=opts.crop_x_offset, y_off=opts.crop_y_offset,
+                        fill_frac=opts.fill_fraction)
 
     # Effects (zoompan) are composed into the caption burn as ONE pass, so loud-beat
     # detection runs here but no separate effects encode happens.
@@ -152,11 +182,33 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
     else:
         yield {"msg": "2/3  Burning captions (effects: none)..."}
 
+    # Profanity censor: bleep/mute the audio over the flagged spans (composed into
+    # this same encode — no extra pass) and mask the caption. Both honour the per-row
+    # flags the editor set. Skipped cleanly when disabled or there are no hits.
+    audio_graph = None
+    if _censor_audio(opts):
+        dur = _probe_duration(clip.reframed_path)
+        spans = censor_mod.merge_spans(transcript.censor_spans(),
+                                       gconf.CENSOR_PAD_S, dur)
+        flagged = sum(1 for w in transcript.words if w.censor)
+        skipped = flagged - sum(1 for w in transcript.words
+                                if w.censor and w.end > w.start)
+        if spans:
+            audio_graph = censor_mod.audio_graph(spans, dur, mode=opts.censor_audio_mode)
+            note = f"     Censor: {len(spans)} span(s) [{opts.censor_audio_mode}]"
+            if skipped:
+                note += f"; {skipped} flagged word(s) had no timestamp (caption-only)"
+            yield {"msg": note + "."}
+        elif flagged:
+            yield {"msg": f"     Censor: {flagged} flagged word(s) had no timestamp "
+                          f"(caption masked, audio unchanged)."}
+
     write_captions(transcript, opts, clip.ass_path)
     # The caption burn is the FINAL encode unless an overlay pass still follows.
     cap_out = clip.captioned_path if has_overlay else clip.final_path
     burn_captions(clip.reframed_path, clip.ass_path, cap_out,
-                  effects_vf=effects_vf, final=not has_overlay)
+                  effects_vf=effects_vf, final=not has_overlay,
+                  audio_graph=audio_graph)
 
     if has_overlay:
         yield {"msg": f"3/3  Compositing overlay '{opts.overlay_name}' (final encode)..."}

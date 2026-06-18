@@ -133,7 +133,15 @@ def build_youtube(session: AutoSession, video: str | Path,
                   progress: Progress | None = None) -> Path:
     """Assemble the chosen candidates into ONE 16:9 YouTube video at native
     resolution. No blur-pad reframe, no like/subscribe overlay, no karaoke captions
-    — that 9:16 Shorts backend is intentionally not called. Returns the output path."""
+    — that 9:16 Shorts backend is intentionally not called. Profanity is bleeped from
+    the audio (shared gameplay.censor), audio-only since there are no captions here.
+    Returns the output path."""
     from fullauto import export as export_mod
+    censor_spans = None
+    if gconf.CENSOR_ENABLED and gconf.CENSOR_AUDIO and session.transcript_path.exists():
+        from gameplay import censor as cmod
+        t = Transcript.load(session.transcript_path)
+        censor_spans = cmod.merge_spans(t.censor_spans(), gconf.CENSOR_PAD_S)
     out = session.dir / f"{session.name}_youtube.mp4"
-    return export_mod.export_youtube(video, candidates, out, progress=progress)
+    return export_mod.export_youtube(video, candidates, out, progress=progress,
+                                     censor_spans=censor_spans)

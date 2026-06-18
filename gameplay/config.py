@@ -110,13 +110,18 @@ INTERMEDIATE_PRESET = "medium"
 
 # --- Reframe (9:16 layout) ---
 # How the 16:9 source is fit into 1080x1920:
-#   "blur_pad" (default) — full frame centred over a blurred fill (no crop, but a
-#                          ~16:9 strip carries the action; most pixels are blur).
-#   "fit_crop"           — scale to FILL the frame and crop the sides; gameplay fills
-#                          1080x1920 at full resolution (sharpest; loses side edges).
-#   "zoom_blur"          — blur-pad but the centred gameplay band scaled up by
-#                          ZOOM_BLUR_SCALE (bigger band, smaller blur bars).
-REFRAME_MODE = "blur_pad"    # "blur_pad" | "fit_crop" | "zoom_blur"
+#   "fill" (DEFAULT, recommended) — cover + crop so the gameplay fills the whole frame
+#                          at full resolution (sharpest, no wasted blur bars). Loses the
+#                          far horizontal edges; bias the crop with REFRAME_CROP_X_OFFSET
+#                          (for ARAM the fight is centre; nudge to keep the minimap).
+#   "fit_crop"           — fill at fraction 1.0, centred (alias of the old behaviour).
+#   "blur_pad"           — full frame centred over a blurred fill (no crop, but a ~16:9
+#                          strip carries the action; most pixels are blur).
+#   "zoom_blur"          — blur-pad with the centred gameplay band scaled up.
+REFRAME_MODE = "fill"        # "fill" | "fit_crop" | "blur_pad" | "zoom_blur"
+REFRAME_FILL_FRACTION = 1.0  # fill: zoom past cover (>=1.0; 1.0 = just fills the frame)
+REFRAME_CROP_X_OFFSET = 0.5  # fill: horizontal crop bias (0=left, 0.5=centre, 1=right)
+REFRAME_CROP_Y_OFFSET = 0.5  # fill: vertical crop bias (0=top, 0.5=centre, 1=bottom)
 ZOOM_BLUR_SCALE = 1.4        # zoom_blur: enlarge the centred gameplay band by this factor
 BLUR_RADIUS = 24        # boxblur luma radius for the top/bottom filler
 BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are clean
@@ -124,9 +129,10 @@ BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are 
 # --- Captions ---
 CAPTION_FONT = _lore.CAPTION_AW_FONT          # bundled Anton by default
 CAPTION_FONTSIZE = _lore.CAPTION_AW_FONTSIZE
-# Lower than the lore default (0.60): on gameplay footage 0.60 sits on the weapon/
-# HUD. 0.78 drops captions into the lower blur band, off the action. GUI slider tunes it.
-CAPTION_POS_Y_FRAC = 0.78
+# Lower than the lore default (0.60): the "fill" layout puts gameplay across the whole
+# frame, so captions sit on a readable lower band (0.82) that clears the HUD and the
+# bottom-centre like/subscribe overlay. GUI slider tunes it per build.
+CAPTION_POS_Y_FRAC = 0.82
 SPEAKER_PALETTE = list(DEFAULT_SPEAKER_PALETTE)  # offered in the transcript editor
 # When diarization finds no/one speaker, seed this many default SPEAKER_NN rows in
 # the colour grid (palette hex) so it's never empty and the user has starter colours.
@@ -134,6 +140,32 @@ DEFAULT_SPEAKER_ROWS = 2
 # Render-side defence in depth (independent of the ASR clamp above):
 CAPTION_MAX_EVENT_S = 1.2        # no single caption stays on screen longer than this
 CAPTION_MAX_LINE_CHARS = 12      # wrap/hard-split so no line exceeds the frame width
+
+# --- Profanity censor (gameplay/censor.py) ---
+# Bleep/mute the audio AND mask the caption on curse words, driven off ONE word-list
+# and the WhisperX word spans (a censored word is the same (text,start,end) the
+# captions use). Matching is WHOLE-WORD + case-insensitive (never substring), so the
+# allow-list entries below ("Shaco", "assassin", "Cassiopeia") never trip. Add your
+# group's slang to CENSOR_WORDLIST; deterministic given the list + transcript.
+CENSOR_ENABLED = True            # master switch for the whole feature
+CENSOR_AUDIO = True              # censor the audio over each hit span
+CENSOR_CAPTION = True            # mask the matching word in the burned caption
+CENSOR_AUDIO_MODE = "bleep"      # "bleep" (1kHz tone) | "mute" (silence) | "duck" (quieten)
+CENSOR_CAPTION_STYLE = "stars"   # "stars" -> f***  |  "block" -> [bleep]
+CENSOR_PAD_S = 0.05              # widen each hit span by this (s) so onsets aren't clipped
+CENSOR_BLEEP_HZ = 1000           # bleep tone frequency
+CENSOR_BLEEP_GAIN = 0.3          # bleep tone amplitude (0..1)
+CENSOR_DUCK_GAIN = 0.2           # "duck" mode: span volume multiplier
+CENSOR_WORDLIST = [
+    "fuck", "fucking", "fucked", "fucker", "motherfucker", "shit", "shitty",
+    "bitch", "bastard", "asshole", "dick", "dickhead", "cunt", "piss", "pissed",
+    "cock", "slut", "whore", "douche", "wanker", "retard", "retarded", "fag",
+    "faggot", "nigger", "nigga",
+]
+CENSOR_ALLOWLIST = [             # whole words that must NEVER be censored
+    "shaco", "assassin", "assassins", "cassiopeia", "scunthorpe", "class",
+    "pass", "bass", "grass", "dictionary", "cockpit", "shitake",
+]
 
 # --- Effects (starter set; the registry in effects.py is built to extend) ---
 PUNCH_ZOOM_AMOUNT = 0.08    # 1.0 -> 1.08 push on a beat

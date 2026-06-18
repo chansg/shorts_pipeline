@@ -2,9 +2,9 @@
 
 These power the editor's bulk-edit buttons (multi-row speaker assign, find/replace,
 merge, split). They operate on the editable grid's raw rows — `[text, speaker,
-start, end]` — and return new rows, preserving the `(text, start, end, speaker)`
-tuple contract that `karaoke_captions.build_ass` consumes. No Gradio import, so
-they're trivially unit-testable.
+start, end, censor]` — and return new rows, preserving the `(text, start, end,
+speaker)` tuple contract and the per-row censor flag. No Gradio import, so they're
+trivially unit-testable.
 
 Row indices in the public API are 1-based (what the user sees in the grid).
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-COLS = 4   # text, speaker, start, end
+COLS = 5   # text, speaker, start, end, censor
 
 
 def _to_float(v, default=0.0) -> float:
@@ -22,13 +22,19 @@ def _to_float(v, default=0.0) -> float:
         return default
 
 
+def _to_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v or "").strip().lower() in ("✓", "true", "1", "yes", "y", "x")
+
+
 def _norm(rows) -> list[list]:
-    """Coerce incoming rows (possibly ragged / numpy / tuples) to [text,spk,start,end]."""
+    """Coerce incoming rows (ragged / numpy / tuples) to [text,spk,start,end,censor]."""
     out = []
     for row in rows or []:
-        row = list(row) + ["", "", 0.0, 0.0]
+        row = list(row) + ["", "", 0.0, 0.0, False]
         out.append([str(row[0] or ""), str(row[1] or "").strip(),
-                    _to_float(row[2]), _to_float(row[3])])
+                    _to_float(row[2]), _to_float(row[3]), _to_bool(row[4])])
     return out
 
 
@@ -100,8 +106,9 @@ def merge_rows(rows, span: str) -> list[list]:
     speaker = next((rows[i][1] for i in idx if rows[i][1]), "")
     start = min(rows[i][2] for i in idx)
     end = max(rows[i][3] for i in idx)
+    censor = any(rows[i][4] for i in idx)        # censor the merge if any part was
     keep = [r for j, r in enumerate(rows) if j not in set(idx)]
-    keep.insert(idx[0], [merged_text, speaker, start, end])
+    keep.insert(idx[0], [merged_text, speaker, start, end, censor])
     keep.sort(key=lambda r: r[2])
     return keep
 
@@ -113,13 +120,13 @@ def split_row(rows, row_1based: int, first_n_words: int | None = None) -> list[l
     i = int(row_1based) - 1
     if not (0 <= i < len(rows)):
         return rows
-    text, speaker, start, end = rows[i]
+    text, speaker, start, end, censor = rows[i]
     words = text.split()
     if len(words) < 2:
         return rows
     k = len(words) // 2 if first_n_words is None else int(first_n_words)
     k = max(1, min(k, len(words) - 1))
     mid = round(start + (end - start) * (k / len(words)), 3)
-    first = [" ".join(words[:k]), speaker, start, mid]
-    second = [" ".join(words[k:]), speaker, mid, end]
+    first = [" ".join(words[:k]), speaker, start, mid, censor]
+    second = [" ".join(words[k:]), speaker, mid, end, censor]
     return rows[:i] + [first, second] + rows[i + 1:]
