@@ -1332,5 +1332,12 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = build_app()
+    # ssr_mode=False: this is one large single-page Blocks (lore wizard + gaming +
+    # full-auto + settings all mounted at once). With Gradio's default server-side
+    # rendering, every interaction re-runs a full-tree render/hydration, which on a
+    # session with loaded media (stills galleries, clip video, transcript grids)
+    # blanks the page for several seconds when switching modes — the "black screen,
+    # work missing" symptom. Client-side rendering toggles container visibility
+    # without that stall. (Session state is unaffected — it lives server-side.)
     app.queue().launch(inbrowser=True, show_error=True, theme=gr.themes.Soft(),
-                       css=_LANDING_CSS)
+                       css=_LANDING_CSS, ssr_mode=False)
