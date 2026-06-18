@@ -34,6 +34,12 @@ WHISPERX_MODEL = WHISPERX_MODEL_CUDA   # back-compat alias (the GPU default)
 WHISPERX_BATCH = 16                # transcription batch size; lower if GPU OOM
 WHISPERX_COMPUTE_CUDA = "float16"  # cuda compute type ("int8" uses less VRAM)
 WHISPERX_COMPUTE_CPU = "int8"      # cpu fallback compute type
+# Transcription language. WhisperX auto-detects from the first 30s when this is
+# None — but on noisy gameplay intros that mis-detects (English audio came out as
+# Danish), and a wrong language also loads the wrong alignment model. Pin it so the
+# captions are always in the spoken language. Set to a whisper code ("en", "es",
+# "de", …) or None to restore auto-detection.
+WHISPERX_LANGUAGE = "en"
 DIARIZE_MIN_SPEAKERS = 1
 DIARIZE_MAX_SPEAKERS = 6           # 4-5 people expected; a little headroom
 # ASR anti-hallucination (noisy gameplay audio).

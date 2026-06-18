@@ -287,13 +287,17 @@ def _transcribe_with_oom_retry(model, audio, batch: int, oom_batch: int,
 
 
 def _load_model(whisperx, plan, asr_options: dict, vad_options: dict):
-    """Load the WhisperX model, passing our ASR + VAD options. Older/other whisperx
-    builds may not accept every kwarg, so progressively drop the optional ones
-    (vad first, then asr_options) rather than failing — the bare load always works."""
+    """Load the WhisperX model, passing our ASR + VAD options and a pinned language.
+    Older/other whisperx builds may not accept every kwarg, so progressively drop the
+    optional ones (vad first, then asr_options) rather than failing — the bare load
+    always works. `language` (gconf.WHISPERX_LANGUAGE) skips WhisperX's unreliable
+    per-clip auto-detection; None restores auto-detect."""
+    lang = gconf.WHISPERX_LANGUAGE
     attempts = (
-        dict(compute_type=plan.compute_type, asr_options=asr_options,
+        dict(compute_type=plan.compute_type, asr_options=asr_options, language=lang,
              vad_method=gconf.WHISPERX_VAD_METHOD, vad_options=vad_options),
-        dict(compute_type=plan.compute_type, asr_options=asr_options),
+        dict(compute_type=plan.compute_type, asr_options=asr_options, language=lang),
+        dict(compute_type=plan.compute_type, language=lang),
         dict(compute_type=plan.compute_type),
     )
     last_err: Exception | None = None
@@ -331,7 +335,9 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
     if plan.warning:
         _emit(progress, plan.warning)
     batch = int(batch_size or gconf.WHISPERX_BATCH)
-    _emit(progress, f"Loading WhisperX ({plan.describe()}, batch={batch})...")
+    _lang = gconf.WHISPERX_LANGUAGE
+    _emit(progress, f"Loading WhisperX ({plan.describe()}, batch={batch}, "
+                    f"language={_lang or 'auto-detect'})...")
     # Anti-repetition ASR options. WhisperX runs BATCHED inference, whose decode path
     # only honours no_repeat_ngram_size / repetition_penalty (the rest are kept for
     # forward-compat / the non-batched fallback — see gameplay/config.py). VAD is

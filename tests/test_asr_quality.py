@@ -100,3 +100,37 @@ def test_transcribe_oom_retry_keeps_chunk_size():
 def test_chunk_size_default_is_small():
     # Guard the default away from WhisperX's 30s (which caused the 26s->5 words bug).
     assert 0 < gconf.WHISPERX_CHUNK_SIZE <= 15
+
+
+# ---- pinned language (fixes English audio transcribed as Danish) ------------
+
+def test_load_model_pins_language():
+    # _load_model must pass the configured language to whisperx.load_model so it
+    # skips unreliable per-clip auto-detection (which mis-detected Danish).
+    calls = []
+
+    class FakeWX:
+        def load_model(self, arch, device, **kw):
+            calls.append(kw)
+            return "model"
+
+    class Plan:
+        compute_type = "float16"; device = "cuda"; model = "large-v2"
+
+    assert tx._load_model(FakeWX(), Plan(), {"x": 1}, {"y": 2}) == "model"
+    assert calls[0]["language"] == gconf.WHISPERX_LANGUAGE == "en"
+
+
+def test_load_model_falls_back_dropping_unsupported_kwargs():
+    # An older whisperx that only accepts compute_type must still load (the
+    # progressive fallback drops language/asr/vad kwargs rather than failing).
+    class PickyWX:
+        def load_model(self, arch, device, **kw):
+            if set(kw) - {"compute_type"}:
+                raise TypeError("unexpected kwarg")
+            return "bare"
+
+    class Plan:
+        compute_type = "int8"; device = "cpu"; model = "small"
+
+    assert tx._load_model(PickyWX(), Plan(), {}, {}) == "bare"

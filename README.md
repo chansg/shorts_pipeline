@@ -203,6 +203,10 @@ of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
   clip. Lower = more coverage, more fragmentation.
 - **VAD** sensitivity is exposed as `WHISPERX_VAD_ONSET` / `WHISPERX_VAD_OFFSET`
   (lower onset = recover more speech, at the risk of decoding loud non-speech).
+- **Language** — `WHISPERX_LANGUAGE` (default `"en"`) pins the transcription language.
+  WhisperX's per-clip auto-detect mis-fires on noisy gameplay intros (English audio
+  came out as **Danish**, which also loads the wrong alignment model). Set another
+  whisper code (`"es"`, `"de"`, …) or `None` to restore auto-detection.
 - **Post-guard** — `WHISPERX_MAX_WORD_CHARS` repairs a repetition token (collapses
   4+ char runs) or drops it if still absurd, *before* the editable grid, so a
   300-char wall can never reach captions. `WHISPERX_MAX_WORD_S` still clamps duration.
