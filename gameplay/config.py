@@ -167,6 +167,17 @@ CENSOR_ALLOWLIST = [             # whole words that must NEVER be censored
     "pass", "bass", "grass", "dictionary", "cockpit", "shitake",
 ]
 
+# --- Narrated hook (gameplay/hook.py) ---
+# Read an opening hook line aloud (ElevenLabs) over the start of the Short — the
+# TikTok "story-time" format. Per-build toggle (default off); the game audio ducks
+# under the narration and swells back when it ends. Reuses the lore ElevenLabs client.
+NARRATED_HOOK_ENABLED = False    # documents the default; the real control is per-build
+HOOK_VOICE = _lore.ELEVENLABS_VOICE_ID   # default = the lore pipeline's voice
+HOOK_LEAD_IN_S = 0.0             # tiny pad before the narration starts
+DUCK_LEVEL = 0.25               # game-audio volume under the narration (0..1)
+DUCK_RELEASE_S = 0.3            # ramp back to full over this many seconds after the line
+NARRATOR_CAPTION_COLOR = (0, 229, 255)   # reserved cyan — the hook caption's colour
+
 # --- Effects (starter set; the registry in effects.py is built to extend) ---
 PUNCH_ZOOM_AMOUNT = 0.08    # 1.0 -> 1.08 push on a beat
 PUNCH_ZOOM_SIGMA = 0.12     # seconds; width of each zoom pulse

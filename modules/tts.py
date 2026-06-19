@@ -16,8 +16,12 @@ import numpy as np
 import config
 
 
-def synthesize(text: str, out_path: str | Path) -> Path:
-    """Generate a voiceover WAV from text using ElevenLabs. Raises on any failure."""
+def synthesize(text: str, out_path: str | Path,
+               voice_id: str | None = None) -> Path:
+    """Generate a voiceover WAV from text using ElevenLabs. Raises on any failure.
+
+    `voice_id` overrides config.ELEVENLABS_VOICE_ID (e.g. the gameplay narrated-hook
+    uses its own HOOK_VOICE); None keeps the lore pipeline's voice — same client."""
     out_path = Path(out_path)
 
     api_key = os.environ.get("ELEVENLABS_API_KEY")
@@ -32,7 +36,7 @@ def synthesize(text: str, out_path: str | Path) -> Path:
 
     # pcm_24000 = raw 16-bit PCM @ 24 kHz, wrapped into WAV for Whisper + ffmpeg.
     audio = client.text_to_speech.convert(
-        voice_id=config.ELEVENLABS_VOICE_ID,
+        voice_id=voice_id or config.ELEVENLABS_VOICE_ID,
         model_id=config.ELEVENLABS_MODEL,
         text=text,
         output_format="pcm_24000",
