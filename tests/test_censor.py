@@ -129,3 +129,30 @@ def test_added_row_with_blank_timing_keeps_censor():
     assert [w.text for w in t.words] == ["aim", "bullshit"]
     assert t.words[1].censor is True                              # stem-flagged
     assert t.censor_spans() and t.censor_spans()[-1][0] == 0.4    # inferred after "aim"
+
+
+def test_added_rows_with_default_zero_timing_infer_in_place():
+    from gameplay.transcript import Transcript
+    # Gradio fills a new row's number cells with 0/0 (not blank). A real word never has
+    # end==start==0, so 0/0 means "added row" -> infer timing after the previous word
+    # instead of pinning it (and its censor) to t=0.
+    t = Transcript.from_rows([["spray", "S0", 7.4, 7.7, False],
+                              ["what", "", 0, 0, False],
+                              ["the", "", 0, 0, False],
+                              ["fuck?", "", 0, 0, False]])     # right-click-added, 0/0
+    assert [w.text for w in t.words] == ["spray", "what", "the", "fuck?"]
+    assert t.words[1].start == 7.7                             # inferred after "spray"
+    assert t.words[3].censor is True                          # 'fuck?' auto-flagged
+    assert t.censor_spans() and t.censor_spans()[0][0] >= 7.7  # bleep not at t=0
+
+
+def test_coerce_censor_grid_makes_new_row_a_real_bool():
+    from gameplay.gui import _coerce_censor_grid
+    # a right-click-added row hands us "" in the censor column (renders as a text box);
+    # coercion turns it into a real bool (a tickable checkbox) and auto-ticks profanity.
+    out = _coerce_censor_grid([["spray", "S0", 7.4, 7.7, False],
+                               ["fuck?", "", 0, 0, ""]])       # "" -> not a checkbox
+    assert out[1][4] is True                                   # profane -> auto-ticked
+    assert isinstance(out[0][4], bool) and out[0][4] is False  # clean -> empty checkbox
+    # idempotent: a second pass is a no-op (so the .change loop settles)
+    assert _coerce_censor_grid(out) == out

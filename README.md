@@ -299,9 +299,14 @@ spans — so audio and caption censor the same moment. **On by default.**
 - **Editor:** profane text is **auto-censored at build** (typed, edited, or added),
   so a right-click-added row is censored without even ticking the box. The per-row
   **censor** checkbox can ADD censor to a non-listed word (e.g. a name); to KEEP a
-  flagged word uncensored, add it to `CENSOR_ALLOWLIST`. Added rows with blank timing
-  are kept (timing inferred) rather than dropped. Adjacent hits merge; a flagged word
-  with no timestamp is masked in the caption but skipped for audio (logged).
+  flagged word uncensored, add it to `CENSOR_ALLOWLIST`.
+- **Added rows are tickable.** Gradio renders a new row's censor cell as a text box
+  (it holds `""` until it carries a real bool), so the checkbox was missing — the grid
+  now coerces that column to a real bool on every change, so the checkbox appears and
+  auto-ticks profane text. A new row's default `0`/`0` timing (or blank) is treated as
+  "added" and **inferred** to sit right after the previous word, so its bleep/mask lands
+  in place instead of at `t=0`. Adjacent hits merge; a flagged word with no timestamp is
+  masked in the caption but skipped for audio (logged).
 
 ### Narrated hook (story-time opener)
 

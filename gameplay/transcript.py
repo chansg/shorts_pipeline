@@ -151,7 +151,10 @@ class Transcript:
                 continue
             speaker = str(row[1] or "").strip() or None
             start, end = _to_float_or_none(row[2]), _to_float_or_none(row[3])
-            if start is None or end is None:        # added/edited row missing timing
+            # Blank timing OR Gradio's default 0/0 on a right-click-added row (a real
+            # word always has end>start) -> infer sequential timing so the inserted
+            # word (and its censor) lands after the previous one, not pinned at t=0.
+            if start is None or end is None or (start == 0 and end == 0):
                 start, end = last_end, last_end + 0.5
             if end < start:
                 start, end = end, start

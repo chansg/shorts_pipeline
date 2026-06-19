@@ -153,6 +153,26 @@ def _do_transcribe(video, diarize, clip_name):
         raise gr.Error(str(friendly(e)), duration=None)
 
 
+def _coerce_censor_grid(rows):
+    """Normalise the censor column to a real bool on every grid change.
+
+    Gradio renders a right-click-added row's bool cell as an empty TEXT box (it holds
+    "" until it carries an actual bool), so the user can't tick it. Coercing the cell
+    to a real bool makes the checkbox appear and become tickable. Profane text is also
+    auto-ticked so the user can see it will be censored. Row order and timing are left
+    untouched (sorting/inference happen at build via Transcript.from_rows); the helper
+    is idempotent so the .change loop settles in one pass."""
+    from gameplay import censor as _censor
+    from gameplay.transcript import _truthy
+    out = []
+    for row in Transcript._normalise_grid(rows):
+        row = (row + ["", "", "", "", False])[:5]
+        text = str(row[0] or "").strip()
+        row[4] = _truthy(row[4]) or (bool(text) and _censor.is_censored(text))
+        out.append(row)
+    return out
+
+
 def _swatches_md(spk_rows) -> str:
     """Inline speaker→colour chips so the mapping is visible while editing."""
     chips = []
@@ -440,6 +460,9 @@ def build_gameplay_tab() -> None:
                   [transcript_df, speaker_df, editor_md, speaker_swatch_md])
         # keep the inline colour swatches in sync as the user edits the colour grid
         speaker_df.change(_swatches_md, speaker_df, speaker_swatch_md)
+        # a right-click-added row's censor cell renders as a text box until it holds a
+        # real bool; coerce it on every change so the checkbox appears and is tickable
+        transcript_df.change(_coerce_censor_grid, transcript_df, transcript_df)
 
         # transcript bulk-edit wiring (each returns updated grid rows + a status)
         edit_assign_btn.click(_edit_assign,
