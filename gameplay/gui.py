@@ -201,9 +201,24 @@ def _load_editor(clip_name):
     return _editor_payload(Transcript.load(clip.transcript_path))
 
 
+def _preview_hook(text, voice):
+    """Synthesize the hook line so the user can hear the voice before building.
+    Cached by (text, voice) — repeated previews of the same line don't re-bill."""
+    if not (text or "").strip():
+        raise gr.Error("Type a hook line to preview.")
+    try:
+        from gameplay import hook as hook_mod
+        wav, _dur = hook_mod.synthesize_hook(text, (voice or "").strip() or None,
+                                             gconf.GAMEPLAY_DIR / "_hook_preview")
+        return str(wav)
+    except Exception as e:                       # noqa: BLE001
+        raise gr.Error(str(friendly(e)), duration=None)
+
+
 def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
                 reframe_mode=None, x_off=None, y_off=None, fill_frac=None,
-                censor=None, censor_audio_mode=None):
+                censor=None, censor_audio_mode=None,
+                hook_enabled=False, hook_text="", hook_voice=""):
     overlay_name = None if overlay_choice in (None, "", _NONE) else overlay_choice
     return ManualOptions(
         effects=list(effects or []),
@@ -220,12 +235,15 @@ def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
         fill_fraction=gconf.REFRAME_FILL_FRACTION if fill_frac is None else float(fill_frac),
         censor=censor or "both",
         censor_audio_mode=censor_audio_mode or gconf.CENSOR_AUDIO_MODE,
+        hook_enabled=bool(hook_enabled),
+        hook_text=hook_text or "",
+        hook_voice=hook_voice or "",
     )
 
 
 def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
               dur, font, posy, reframe_mode, x_off, y_off, fill_frac,
-              censor, censor_audio_mode):
+              censor, censor_audio_mode, hook_enabled, hook_text, hook_voice):
     if not clip_name:
         raise gr.Error("Transcribe a clip first.")
     clip = GameplayClip(clip_name)
@@ -236,7 +254,8 @@ def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
         raise gr.Error("The transcript grid is empty — transcribe a clip (or add "
                        "rows) before building.")
     opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
-                       reframe_mode, x_off, y_off, fill_frac, censor, censor_audio_mode)
+                       reframe_mode, x_off, y_off, fill_frac, censor, censor_audio_mode,
+                       hook_enabled, hook_text, hook_voice)
     # make the source of truth unambiguous: the build uses the CURRENT grid, edits included
     log: list[str] = [f"Using your edited transcript ({len(transcript.words)} rows)."]
     yield "\n".join(log)
@@ -375,6 +394,19 @@ def build_gameplay_tab() -> None:
             censor_mode_dd = gr.Dropdown(
                 choices=["bleep", "mute", "duck"], value=gconf.CENSOR_AUDIO_MODE,
                 label="Censor audio mode")
+        with gr.Row():
+            hook_enable_cb = gr.Checkbox(
+                value=False, label="Narrated hook (read an opening line over the clip)")
+            hook_text_tb = gr.Textbox(
+                label="Hook line", scale=3,
+                placeholder="The time I got ganked by 3 people playing Yone")
+            hook_voice_tb = gr.Textbox(value=gconf.HOOK_VOICE, label="Hook voice id",
+                                       scale=1)
+            hook_preview_btn = gr.Button("▶ Preview voice", scale=0)
+        hook_audio = gr.Audio(label="Hook preview", interactive=False)
+        gr.Markdown("Game audio ducks under the narration and swells back. The hook "
+                    "is captioned in the NARRATOR colour. Preview bills ElevenLabs "
+                    "once per (line, voice) — repeats are cached.")
 
         # -- 4. build --
         with gr.Row():
@@ -411,9 +443,12 @@ def build_gameplay_tab() -> None:
 
         refresh_ov_btn.click(_refresh_overlays, None, overlay_dd)
 
+        hook_preview_btn.click(_preview_hook, [hook_text_tb, hook_voice_tb], hook_audio)
+
         build_inputs = [clip_state, transcript_df, speaker_df, effects_cbg,
                         overlay_dd, overlay_pos_dd, overlay_start_n, overlay_dur_n,
                         font_dd, posy_sl, reframe_mode_dd, cropx_sl, cropy_sl,
-                        fillfrac_sl, censor_dd, censor_mode_dd]
+                        fillfrac_sl, censor_dd, censor_mode_dd,
+                        hook_enable_cb, hook_text_tb, hook_voice_tb]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
