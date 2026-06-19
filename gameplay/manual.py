@@ -24,6 +24,7 @@ from gameplay import config as gconf
 from gameplay import censor as censor_mod
 from gameplay import effects as fx_mod
 from gameplay import encode as enc
+from gameplay import hook as hook_mod
 from gameplay import reframe as reframe_mod
 from gameplay.state import GameplayClip
 from gameplay.transcript import Transcript
@@ -45,6 +46,9 @@ class ManualOptions:
     fill_fraction: float = gconf.REFRAME_FILL_FRACTION      # fill: zoom past cover (>=1.0)
     censor: str = "both"          # "both" | "audio" | "caption" | "off"
     censor_audio_mode: str = gconf.CENSOR_AUDIO_MODE        # bleep | mute | duck
+    hook_enabled: bool = False    # narrate an opening hook line over the start
+    hook_text: str = ""           # the hook line (read aloud + captioned in NARRATOR colour)
+    hook_voice: str = ""          # ElevenLabs voice id (blank = gconf.HOOK_VOICE)
 
 
 def _censor_audio(opts: "ManualOptions") -> bool:
@@ -55,7 +59,15 @@ def _censor_caption(opts: "ManualOptions") -> bool:
     return opts.censor in ("both", "caption")
 
 
+def _hook_active(opts: "ManualOptions") -> bool:
+    return bool(opts.hook_enabled and (opts.hook_text or "").strip())
+
+
 def caption_style(opts: ManualOptions) -> CaptionStyle:
+    # The narrated hook caption gets a reserved colour so it reads as separate from
+    # in-game speech; merged with any per-speaker colours the user picked.
+    speaker_colors = dict(opts.speaker_colors or {})
+    speaker_colors.setdefault("NARRATOR", tuple(gconf.NARRATOR_CAPTION_COLOR))
     return CaptionStyle(
         font=opts.caption_font,
         fontsize=gconf.CAPTION_FONTSIZE,
@@ -66,7 +78,7 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
         gap_fill=True,
         max_gap=0.8,    # clear a held word across a long pause (matches lore look)
         hold=0.4,
-        speaker_colors=opts.speaker_colors or {},
+        speaker_colors=speaker_colors,
         # gameplay defence in depth (noisy ASR): never wall the screen or overlap
         max_event_s=gconf.CAPTION_MAX_EVENT_S,
         max_line_chars=gconf.CAPTION_MAX_LINE_CHARS,
@@ -74,16 +86,24 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
     )
 
 
-def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path) -> Path:
-    ass_path.write_text(
-        build_ass(transcript.to_tuples(mask=_censor_caption(opts)), caption_style(opts)),
-        encoding="utf-8")
+def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path,
+                   hook: tuple | None = None) -> Path:
+    """Build the .ass from the transcript tuples. `hook=(text, dur, lead)` prepends the
+    NARRATOR-coloured hook words (shown during the narration) ahead of the normal
+    transcript captions, which are unchanged."""
+    tuples = transcript.to_tuples(mask=_censor_caption(opts))
+    if hook:
+        from gameplay.hook import hook_caption_tuples
+        text, dur, lead = hook
+        tuples = hook_caption_tuples(text, dur, lead) + list(tuples)
+    ass_path.write_text(build_ass(tuples, caption_style(opts)), encoding="utf-8")
     return ass_path
 
 
 def burn_captions(video: Path, ass: Path, out: Path, *,
                   effects_vf: str | None = None, final: bool = True,
-                  audio_graph: str | None = None) -> Path:
+                  audio_graph: str | None = None,
+                  audio_inputs: list[str] | None = None) -> Path:
     """Burn the .ass onto `video` (optionally chaining an `effects_vf` zoompan filter
     BEFORE it, so effects + captions are ONE encode), keeping the clip's own audio.
 
@@ -93,16 +113,17 @@ def burn_captions(video: Path, ass: Path, out: Path, *,
     targeted final encode (CRF 18 + profile high + faststart); `final=False` uses a
     near-lossless intermediate (when an overlay pass still follows).
 
-    `audio_graph` (from gameplay.censor) censors the audio over the hit spans in this
+    `audio_graph` (censor and/or narrated-hook duck/mix) processes the audio in this
     SAME pass — no extra encode. When set, video + audio are composed in one
-    filter_complex; otherwise the audio is stream-copied (lossless)."""
+    filter_complex; otherwise the audio is stream-copied (lossless). `audio_inputs`
+    (e.g. ["-i", hook_wav]) are extra `-i` inputs the graph references as [1:a], [2:a]…"""
     video, out = video.resolve(), out.resolve()
     fonts_rel = os.path.relpath(gconf.FONTS_DIR, ass.parent).replace("\\", "/")
     vchain = ",".join(([effects_vf] if effects_vf else [])
                       + [f"ass={ass.name}:fontsdir={fonts_rel}"])
     enc_args = enc.final_args() if final else enc.intermediate_args()
     if audio_graph and _has_audio(video):
-        cmd = ["ffmpeg", "-y", "-i", str(video),
+        cmd = ["ffmpeg", "-y", "-i", str(video), *(audio_inputs or []),
                "-filter_complex", f"[0:v]{vchain}[v];{audio_graph}",
                "-map", "[v]", "-map", "[a]",
                *enc_args, "-c:a", "aac", "-b:a", "192k", str(out)]
@@ -182,19 +203,36 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
     else:
         yield {"msg": "2/3  Burning captions (effects: none)..."}
 
-    # Profanity censor: bleep/mute the audio over the flagged spans (composed into
-    # this same encode — no extra pass) and mask the caption. Both honour the per-row
-    # flags the editor set. Skipped cleanly when disabled or there are no hits.
-    audio_graph = None
+    # ---- audio: narrated hook + v3 profanity censor, composed into ONE graph ----
+    # (no extra pass — both ride this final encode). Order: censor the bed first,
+    # then duck it under the narration and mix. Each piece degrades cleanly to a no-op.
+    hook = None        # (wav_path, dur_s) when active AND the TTS succeeded
+    if _hook_active(opts):
+        yield {"msg": "     Narrated hook: synthesizing voice (ElevenLabs)..."}
+        try:
+            wav, hdur = hook_mod.synthesize_hook(opts.hook_text,
+                                                 opts.hook_voice or None, clip.dir)
+            hook = (wav, hdur)
+            yield {"msg": f"     Hook: {hdur:.1f}s narration over the opening "
+                          f"(game audio ducks to {gconf.DUCK_LEVEL})."}
+        except Exception as e:        # noqa: BLE001 — degrade, never fail the render
+            yield {"msg": f"     ⚠ Hook TTS failed ({type(e).__name__}: {e}); "
+                          f"building WITHOUT narration."}
+
+    clip_dur = _probe_duration(clip.reframed_path)
+    bed, parts = "[0:a]", []
     if _censor_audio(opts):
-        dur = _probe_duration(clip.reframed_path)
         spans = censor_mod.merge_spans(transcript.censor_spans(),
-                                       gconf.CENSOR_PAD_S, dur)
+                                       gconf.CENSOR_PAD_S, clip_dur)
         flagged = sum(1 for w in transcript.words if w.censor)
-        skipped = flagged - sum(1 for w in transcript.words
-                                if w.censor and w.end > w.start)
         if spans:
-            audio_graph = censor_mod.audio_graph(spans, dur, mode=opts.censor_audio_mode)
+            cen_out = "[__cen]" if hook else "[a]"
+            parts.append(censor_mod.audio_graph(spans, clip_dur,
+                                                mode=opts.censor_audio_mode,
+                                                src=bed, out=cen_out))
+            bed = cen_out
+            skipped = flagged - sum(1 for w in transcript.words
+                                    if w.censor and w.end > w.start)
             note = f"     Censor: {len(spans)} span(s) [{opts.censor_audio_mode}]"
             if skipped:
                 note += f"; {skipped} flagged word(s) had no timestamp (caption-only)"
@@ -202,13 +240,19 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
         elif flagged:
             yield {"msg": f"     Censor: {flagged} flagged word(s) had no timestamp "
                           f"(caption masked, audio unchanged)."}
+    if hook:
+        parts.append(hook_mod.duck_mix_graph(bed, hook[1], lead=gconf.HOOK_LEAD_IN_S))
 
-    write_captions(transcript, opts, clip.ass_path)
+    audio_graph = ";".join(parts) if parts else None
+    audio_inputs = ["-i", str(hook[0])] if hook else None
+    cap_hook = (opts.hook_text, hook[1], gconf.HOOK_LEAD_IN_S) if hook else None
+
+    write_captions(transcript, opts, clip.ass_path, hook=cap_hook)
     # The caption burn is the FINAL encode unless an overlay pass still follows.
     cap_out = clip.captioned_path if has_overlay else clip.final_path
     burn_captions(clip.reframed_path, clip.ass_path, cap_out,
                   effects_vf=effects_vf, final=not has_overlay,
-                  audio_graph=audio_graph)
+                  audio_graph=audio_graph, audio_inputs=audio_inputs)
 
     if has_overlay:
         yield {"msg": f"3/3  Compositing overlay '{opts.overlay_name}' (final encode)..."}
