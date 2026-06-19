@@ -130,9 +130,10 @@ BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are 
 CAPTION_FONT = _lore.CAPTION_AW_FONT          # bundled Anton by default
 CAPTION_FONTSIZE = _lore.CAPTION_AW_FONTSIZE
 # Lower than the lore default (0.60): the "fill" layout puts gameplay across the whole
-# frame, so captions sit on a readable lower band (0.82) that clears the HUD and the
-# bottom-centre like/subscribe overlay. GUI slider tunes it per build.
-CAPTION_POS_Y_FRAC = 0.82
+# frame, so captions sit on a readable lower band. 0.72 keeps them ABOVE the branded
+# like/subscribe banner (centred ~0.84), so caption and banner never overlap. GUI
+# slider tunes it per build.
+CAPTION_POS_Y_FRAC = 0.72
 SPEAKER_PALETTE = list(DEFAULT_SPEAKER_PALETTE)  # offered in the transcript editor
 # When diarization finds no/one speaker, seed this many default SPEAKER_NN rows in
 # the colour grid (palette hex) so it's never empty and the user has starter colours.
@@ -189,7 +190,15 @@ ENERGY_WINDOW_S = 0.10      # RMS window for the audio-energy envelope
 ENERGY_MAX_PEAKS = 24       # cap so the ffmpeg filter expression stays bounded
 ENERGY_MIN_GAP_S = 0.40     # merge peaks closer than this
 
-# --- Overlay defaults ---
+# --- Overlay defaults (branded like/subscribe bottom banner) ---
+# The shipped asset is a wide 3.18:1 call-to-action bar (LIKE + ASHEN CHAN + SUBSCRIBE
+# + bell), scaled to OVERLAY_WIDTH_FRAC of the frame width (aspect preserved) and
+# centred horizontally at OVERLAY_POS_Y_FRAC (the banner's vertical CENTRE). It sits in
+# a low band that clears the caption band — captions were moved up to 0.72 (above) so
+# the two never collide. The placeholder remains in overlays/ but is no longer default.
+LIKE_SUB_OVERLAY = "like_subscribe_overlay.png"   # default branded banner in overlays/
+OVERLAY_WIDTH_FRAC = 0.85         # banner width as a fraction of the 1080px frame (~918px -> ~288px tall)
+OVERLAY_POS_Y_FRAC = 0.84         # banner vertical CENTRE (0=top, 1=bottom); ~0.76-0.92 band
 OVERLAY_DEFAULT_POSITION = "bottom-center"
 OVERLAY_DEFAULT_START = 1.0       # seconds
 OVERLAY_DEFAULT_DURATION = 4.0    # seconds (0 / None = whole clip)

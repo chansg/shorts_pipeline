@@ -66,9 +66,13 @@ def _position_xy(position: str) -> tuple[str, str]:
 
 def composite(base: str | Path, overlay_name: str, out: str | Path,
               position: str | None = None, start: float | None = None,
-              duration: float | None = None) -> Path:
+              duration: float | None = None, width_frac: float | None = None,
+              pos_y_frac: float | None = None) -> Path:
     """Composite the named overlay (from overlays/) onto `base`, writing `out`.
 
+    The overlay is scaled to `width_frac` of the frame width (aspect preserved) and
+    centred horizontally (per `position`), with its vertical CENTRE at `pos_y_frac` —
+    so the wide branded banner lands as a bottom bar that clears the caption band.
     `duration` of 0 / None means show until the end of the clip. Raises a
     FriendlyError for the real failure modes (asset missing, no alpha channel).
     Idempotent."""
@@ -88,7 +92,8 @@ def composite(base: str | Path, overlay_name: str, out: str | Path,
 
     position = position or gconf.OVERLAY_DEFAULT_POSITION
     start = gconf.OVERLAY_DEFAULT_START if start is None else float(start)
-    x, y = _position_xy(position)
+    width_frac = gconf.OVERLAY_WIDTH_FRAC if width_frac is None else float(width_frac)
+    pos_y_frac = gconf.OVERLAY_POS_Y_FRAC if pos_y_frac is None else float(pos_y_frac)
     is_video = asset.suffix.lower() in _VIDEO_EXTS
 
     enable = ""
@@ -97,18 +102,23 @@ def composite(base: str | Path, overlay_name: str, out: str | Path,
     elif start > 0:
         enable = f":enable='gte(t,{start:.3f})'"
 
+    # Scale the overlay to `width_frac` of the frame width (aspect preserved, even
+    # height). Horizontal anchor from the position preset (centre by default); the
+    # vertical CENTRE sits at `pos_y_frac` so the banner lands in a fixed low band.
+    ow = max(2, int(round(gconf.WIDTH * width_frac)))
+    x_anchor = _position_xy(position)[0]
+    y_expr = f"H*{pos_y_frac:.4f}-h/2"
+
     # The overlay input must be an endless stream so it persists across its enable
     # window: loop a video overlay (a short animation repeats), and loop a still
     # png (a single frame would otherwise show only at t=0 then vanish).
     if is_video:
         inputs = ["-i", str(base), "-stream_loop", "-1", "-i", str(asset)]
-        setpts = f"[1:v]setpts=PTS-STARTPTS+{start}/TB[ov];"
-        ov_label = "[ov]"
+        pre = f"[1:v]setpts=PTS-STARTPTS+{start}/TB,scale={ow}:-2[ov];"
     else:
         inputs = ["-i", str(base), "-loop", "1", "-i", str(asset)]
-        setpts = ""
-        ov_label = "[1:v]"
-    graph = (f"{setpts}[0:v]{ov_label}overlay={x}:{y}{enable}:"
+        pre = f"[1:v]scale={ow}:-2[ov];"
+    graph = (f"{pre}[0:v][ov]overlay={x_anchor}:{y_expr}{enable}:"
              f"eof_action=pass:format=auto[v]")
 
     from gameplay import encode as enc

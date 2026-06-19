@@ -361,8 +361,12 @@ def build_gameplay_tab() -> None:
                                 label="Caption Y (higher = lower; 0.82 reads on the "
                                       "fill layout, clear of the overlay)")
         with gr.Row():
-            overlay_dd = gr.Dropdown(choices=[_NONE] + ov_mod.list_overlays(),
-                                     value=_NONE, label="Like/subscribe overlay")
+            _ov_choices = [_NONE] + ov_mod.list_overlays()
+            overlay_dd = gr.Dropdown(
+                choices=_ov_choices,
+                value=(gconf.LIKE_SUB_OVERLAY if gconf.LIKE_SUB_OVERLAY in _ov_choices
+                       else _NONE),
+                label="Like/subscribe overlay")
             overlay_pos_dd = gr.Dropdown(choices=ov_mod.POSITIONS,
                                          value=gconf.OVERLAY_DEFAULT_POSITION,
                                          label="Overlay position")
