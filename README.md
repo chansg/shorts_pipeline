@@ -270,6 +270,25 @@ spans — so audio and caption censor the same moment. **On by default.**
   hits merge into one span; a flagged word with no timestamp is masked in the caption
   but skipped for audio (logged).
 
+### Narrated hook (story-time opener)
+
+Optionally read **one opening hook line** aloud over the start of the Short (the TikTok
+"story-time" format — e.g. *"The time I got ganked by 3 people playing Yone"*). Off by
+default; per-build toggle in the gameplay tab.
+
+- Type the line, tick **Narrated hook**, optionally set a voice id (defaults to
+  `HOOK_VOICE` = the lore pipeline's ElevenLabs voice) and **Preview voice**. The TTS
+  reuses the lore ElevenLabs client and is **cached by (line, voice)** — re-builds and
+  repeat previews don't re-bill.
+- The narration plays from the start; the **game audio ducks** to `DUCK_LEVEL` (0.25)
+  under it and **swells back** to full over `DUCK_RELEASE_S` (0.3 s) once the line ends.
+- The hook is captioned in its own reserved **NARRATOR colour** (`NARRATOR_CAPTION_COLOR`,
+  cyan); the normal transcript captions are unchanged. Hook caption timings are
+  distributed evenly across the narration (no per-word ElevenLabs timings).
+- It rides the **same final encode** as captions/effects/censor — **zero extra passes**
+  (censor + duck/mix compose into one audio graph). If ElevenLabs errors, the build
+  completes **without** narration and logs why. Manual mode only.
+
 ### Captions / colours
 
 Captions reuse `modules/karaoke_captions` — the same active-word renderer as the
