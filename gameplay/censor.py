@@ -26,16 +26,26 @@ def _wordset(values) -> set[str]:
     return {_norm(v) for v in (values or []) if _norm(v)}
 
 
-def is_censored(text: str, wordlist=None, allowlist=None) -> bool:
-    """True if ANY whole-word token in `text` is a censored word (and not allow-listed).
-    Case-insensitive, punctuation-tolerant, never a substring match."""
+def _token_hit(token: str, wl: set, al: set, stems) -> bool:
+    """A bare token is censored when it's in the word-list OR contains a stem as a
+    substring — unless it's allow-listed. The stems make matching sensitive to
+    variants/compounds (fucking, bullshit, wankers); the allow-list guards the few
+    clean words a stem would otherwise hit (Scunthorpe, niggle, retardant)."""
+    t = _norm(token)
+    if not t or t in al:
+        return False
+    if t in wl:
+        return True
+    return any(s and s in t for s in stems)
+
+
+def is_censored(text: str, wordlist=None, allowlist=None, stems=None) -> bool:
+    """True if ANY token in `text` is censored (word-list or stem match, allow-listed
+    words excepted). Case-insensitive, punctuation-tolerant."""
     wl = _wordset(gconf.CENSOR_WORDLIST if wordlist is None else wordlist)
     al = _wordset(gconf.CENSOR_ALLOWLIST if allowlist is None else allowlist)
-    for tok in str(text or "").split():
-        t = _norm(tok)
-        if t and t not in al and t in wl:
-            return True
-    return False
+    st = _wordset(gconf.CENSOR_STEMS if stems is None else stems)
+    return any(_token_hit(tok, wl, al, st) for tok in str(text or "").split())
 
 
 def mask_token(token: str, style: str | None = None) -> str:
@@ -57,14 +67,14 @@ def mask_token(token: str, style: str | None = None) -> str:
 
 
 def mask_text(text: str, style: str | None = None,
-              wordlist=None, allowlist=None) -> str:
-    """Mask every censored whole-word token in `text`, leaving the rest intact."""
+              wordlist=None, allowlist=None, stems=None) -> str:
+    """Mask every censored token in `text` (same word-list/stem/allow-list rule as
+    is_censored), leaving the rest intact."""
     wl = _wordset(gconf.CENSOR_WORDLIST if wordlist is None else wordlist)
     al = _wordset(gconf.CENSOR_ALLOWLIST if allowlist is None else allowlist)
-    out = []
-    for tok in str(text or "").split():
-        t = _norm(tok)
-        out.append(mask_token(tok, style) if (t and t not in al and t in wl) else tok)
+    st = _wordset(gconf.CENSOR_STEMS if stems is None else stems)
+    out = [mask_token(tok, style) if _token_hit(tok, wl, al, st) else tok
+           for tok in str(text or "").split()]
     return " ".join(out)
 
 

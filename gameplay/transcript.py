@@ -34,6 +34,17 @@ def _truthy(v) -> bool:
     return str(v or "").strip().lower() in ("✓", "true", "1", "yes", "y", "x")
 
 
+def _to_float_or_none(v) -> float | None:
+    """Parse a grid timing cell to float; None for blank/None/unparseable (so the
+    caller can infer timing for a manually-added row instead of dropping it)."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class Transcript:
     """Word-level transcript with optional speaker labels.
@@ -124,23 +135,29 @@ class Transcript:
 
     @classmethod
     def from_rows(cls, rows, single_speaker: bool = False) -> "Transcript":
-        """Rebuild from edited grid rows. Tolerant of blank/half-filled trailing
-        rows the editor may add, and of out-of-order/garbled timing."""
+        """Rebuild from edited grid rows. Every row WITH TEXT is kept: a manually-added
+        row (right-click → add row) typically has blank timing, so we INFER it
+        (sequential, right after the previous word) instead of dropping the row — that
+        way an inserted word (and its censor flag) survives to the build. Rows with no
+        text are skipped (the editor's trailing blank row). Profane text is auto-flagged
+        for censor even if the box isn't ticked; the tick can only ADD censor."""
+        from gameplay import censor as _censor
         words: list[Word] = []
+        last_end = 0.0
         for row in cls._normalise_grid(rows):
             row = list(row) + ["", "", None, None, False]
             text = str(row[0] or "").strip()
             if not text:
                 continue
             speaker = str(row[1] or "").strip() or None
-            try:
-                start = float(row[2])
-                end = float(row[3])
-            except (TypeError, ValueError):
-                continue
+            start, end = _to_float_or_none(row[2]), _to_float_or_none(row[3])
+            if start is None or end is None:        # added/edited row missing timing
+                start, end = last_end, last_end + 0.5
             if end < start:
                 start, end = end, start
-            words.append(Word(text, start, end, speaker, _truthy(row[4])))
+            censored = _truthy(row[4]) or _censor.is_censored(text)
+            words.append(Word(text, start, end, speaker, censored))
+            last_end = end
         words.sort(key=lambda w: w.start)
         has_speaker = any(w.speaker for w in words)
         return cls(words=words, single_speaker=single_speaker or not has_speaker)

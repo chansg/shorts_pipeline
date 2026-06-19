@@ -13,10 +13,18 @@ def test_matcher_basic_and_case_insensitive():
     assert not censor.is_censored("")
 
 
-def test_matcher_is_whole_word_not_substring():
-    # the classic false positives — must NOT trip (substring "ass"/"shit"/"cock")
+def test_matcher_stems_catch_variants_and_compounds():
+    # the sensitivity lever: stems flag variants/compounds without listing each
+    for w in ("fucking", "fucked", "motherfucker", "bullshit", "dipshit",
+              "wankers", "bitches", "shitty", "clusterfuck"):
+        assert censor.is_censored(w), w
+
+
+def test_matcher_allowlist_guards_stem_false_positives():
+    # stems must NOT trip these clean words (some contain a stem as a substring)
     for clean in ("Shaco", "assassin", "Cassiopeia", "class", "passing",
-                  "grass", "cockpit", "shitake", "Scunthorpe"):
+                  "grass", "cockpit", "shitake", "Scunthorpe", "niggle",
+                  "retardant", "compass"):
         assert not censor.is_censored(clean), clean
 
 
@@ -95,8 +103,29 @@ def test_censor_column_round_trips_and_drives_spans_and_mask():
     assert t2.to_tuples(mask=True)[1][0] == "f***"
 
 
-def test_untick_censor_flag_clears_the_hit():
+def test_profane_text_auto_censors_even_if_unticked():
     from gameplay.transcript import Transcript
-    # user un-ticks the censor checkbox on a flagged row -> no audio span, no mask
+    # Auto-detection wins: a profane word is censored even if the box is unticked
+    # (the tick can only ADD censor). To KEEP a profane word, allow-list it.
     t = Transcript.from_rows([["fuck", "", 0.3, 0.7, False]])
-    assert t.censor_spans() == [] and t.to_tuples(mask=True)[0][0] == "fuck"
+    assert t.censor_spans() == [(0.3, 0.7)] and t.to_tuples(mask=True)[0][0] == "f***"
+
+
+def test_manual_tick_adds_censor_to_a_non_listed_word():
+    from gameplay.transcript import Transcript
+    # a word the lists don't catch is censored when the user ticks the box (e.g. a
+    # manually-added row), and stays clean when not.
+    t = Transcript.from_rows([["noob", "", 1.0, 1.4, True]])
+    assert t.censor_spans() == [(1.0, 1.4)]
+    assert Transcript.from_rows([["noob", "", 1.0, 1.4, False]]).censor_spans() == []
+
+
+def test_added_row_with_blank_timing_keeps_censor():
+    from gameplay.transcript import Transcript
+    # the reported bug: a right-click-added row (blank timing) must survive AND its
+    # profane text be censored — timing inferred, not dropped.
+    t = Transcript.from_rows([["aim", "S0", 0.0, 0.4, False],
+                              ["bullshit", "", "", "", False]])   # added, no timing
+    assert [w.text for w in t.words] == ["aim", "bullshit"]
+    assert t.words[1].censor is True                              # stem-flagged
+    assert t.censor_spans() and t.censor_spans()[-1][0] == 0.4    # inferred after "aim"

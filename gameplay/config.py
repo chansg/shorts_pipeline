@@ -143,11 +143,16 @@ CAPTION_MAX_EVENT_S = 1.2        # no single caption stays on screen longer than
 CAPTION_MAX_LINE_CHARS = 12      # wrap/hard-split so no line exceeds the frame width
 
 # --- Profanity censor (gameplay/censor.py) ---
-# Bleep/mute the audio AND mask the caption on curse words, driven off ONE word-list
-# and the WhisperX word spans (a censored word is the same (text,start,end) the
-# captions use). Matching is WHOLE-WORD + case-insensitive (never substring), so the
-# allow-list entries below ("Shaco", "assassin", "Cassiopeia") never trip. Add your
-# group's slang to CENSOR_WORDLIST; deterministic given the list + transcript.
+# Bleep/mute the audio AND mask the caption on curse words, driven off the WhisperX
+# word spans (a censored word is the same (text,start,end) the captions use). A word
+# is censored (case-insensitive) when its bare token is in CENSOR_WORDLIST OR contains
+# a CENSOR_STEM as a substring — UNLESS it's in CENSOR_ALLOWLIST. The stems catch
+# variants/compounds automatically (fucking, bullshit, wankers, dipshit, motherf...)
+# so far fewer words need a manual tick; the allow-list guards the false positives the
+# stems would otherwise hit (Scunthorpe, niggle, fire-retardant, …). Deterministic.
+# To KEEP a flagged word uncensored, add it to CENSOR_ALLOWLIST (unticking a profane
+# word in the editor no longer keeps it — auto-detection wins; the editor tick only
+# ADDS censor to a word the lists don't already catch).
 CENSOR_ENABLED = True            # master switch for the whole feature
 CENSOR_AUDIO = True              # censor the audio over each hit span
 CENSOR_CAPTION = True            # mask the matching word in the burned caption
@@ -157,15 +162,21 @@ CENSOR_PAD_S = 0.05              # widen each hit span by this (s) so onsets are
 CENSOR_BLEEP_HZ = 1000           # bleep tone frequency
 CENSOR_BLEEP_GAIN = 0.3          # bleep tone amplitude (0..1)
 CENSOR_DUCK_GAIN = 0.2           # "duck" mode: span volume multiplier
-CENSOR_WORDLIST = [
-    "fuck", "fucking", "fucked", "fucker", "motherfucker", "shit", "shitty",
-    "bitch", "bastard", "asshole", "dick", "dickhead", "cunt", "piss", "pissed",
-    "cock", "slut", "whore", "douche", "wanker", "retard", "retarded", "fag",
-    "faggot", "nigger", "nigga",
+# Substrings that flag a token wherever they appear (the sensitivity lever). Chosen so
+# substring matching is safe; the rare clean word they'd hit is in CENSOR_ALLOWLIST.
+CENSOR_STEMS = [
+    "fuck", "shit", "bitch", "cunt", "slut", "whore", "wank", "nigg", "fagg",
+    "retard", "douche", "jizz", "twat",
+]
+CENSOR_WORDLIST = [              # whole words that have no safe stem above
+    "ass", "asshole", "assholes", "dumbass", "jackass", "smartass", "badass",
+    "bastard", "dick", "dickhead", "cock", "piss", "pissed", "prick", "bollocks",
+    "arse", "arsehole", "damn", "goddamn", "crap", "bugger", "wtf", "stfu", "fag",
 ]
 CENSOR_ALLOWLIST = [             # whole words that must NEVER be censored
     "shaco", "assassin", "assassins", "cassiopeia", "scunthorpe", "class",
     "pass", "bass", "grass", "dictionary", "cockpit", "shitake",
+    "niggle", "niggling", "retardant", "class", "compass", "bypass",
 ]
 
 # --- Narrated hook (gameplay/hook.py) ---

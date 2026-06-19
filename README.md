@@ -257,18 +257,23 @@ Curse words are bleeped in the audio **and** masked in the caption, driven off o
 editable word-list (`gameplay/censor.py` + `gameplay/config.py`) and the WhisperX word
 spans — so audio and caption censor the same moment. **On by default.**
 
-- **Word-list** `CENSOR_WORDLIST` + **allow-list** `CENSOR_ALLOWLIST`. Matching is
-  **whole-word**, case-insensitive (never substring), so "Shaco", "assassin",
-  "Cassiopeia" never trip. Add your group's slang to the word-list.
+- **Detection** is case-insensitive: a token is censored if it's in `CENSOR_WORDLIST`
+  **or contains a `CENSOR_STEM`** (e.g. `fuck`, `shit`, `bitch`) as a substring — so
+  variants and compounds (`fucking`, `bullshit`, `wankers`, `dipshit`) are caught
+  automatically without listing each. `CENSOR_ALLOWLIST` guards the clean words a stem
+  would otherwise hit ("Shaco", "assassin", "Scunthorpe", "niggle", fire-"retardant").
+  Add your slang to the stems/word-list.
 - **Audio** `CENSOR_AUDIO_MODE`: `bleep` (1 kHz tone, default — reads as intentional),
   `mute`, or `duck`. Applied in the *same* final encode (no extra pass); for full-auto
   it's applied per cut window (audio-only — no captions there).
 - **Caption** `CENSOR_CAPTION_STYLE`: `stars` (`f***`) or `block` (`[bleep]`).
 - **Toggle** per build in the GUI: bleep+mask / audio-only / caption-only / off.
-- **Editor control:** every transcript row has a **censor** checkbox — auto-ticked from
-  the word-list, untick a false positive or tick a word to censor manually. Adjacent
-  hits merge into one span; a flagged word with no timestamp is masked in the caption
-  but skipped for audio (logged).
+- **Editor:** profane text is **auto-censored at build** (typed, edited, or added),
+  so a right-click-added row is censored without even ticking the box. The per-row
+  **censor** checkbox can ADD censor to a non-listed word (e.g. a name); to KEEP a
+  flagged word uncensored, add it to `CENSOR_ALLOWLIST`. Added rows with blank timing
+  are kept (timing inferred) rather than dropped. Adjacent hits merge; a flagged word
+  with no timestamp is masked in the caption but skipped for audio (logged).
 
 ### Narrated hook (story-time opener)
 

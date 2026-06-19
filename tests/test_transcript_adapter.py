@@ -63,14 +63,16 @@ def test_rows_roundtrip_and_rename():
 
 
 def test_from_rows_is_tolerant():
-    # blank trailing row, non-numeric timing, swapped start/end
-    rows = [["good", "Chan", "0.9", "0.3"],   # swapped -> reordered
+    # blank trailing row dropped; swapped timing reordered; a TEXT row with missing/
+    # unparseable timing is KEPT with inferred sequential timing (so a manually-added
+    # word survives instead of vanishing).
+    rows = [["good", "Chan", "0.9", "0.3"],   # swapped -> reordered to 0.3..0.9
             ["", "", "", ""],                 # blank -> dropped
-            ["bad", "Sam", "x", "y"]]         # bad timing -> dropped
+            ["added", "Sam", "", ""]]         # new row, blank timing -> kept, inferred
     t = Transcript.from_rows(rows)
-    assert len(t.words) == 1
-    w = t.words[0]
-    assert w.text == "good" and w.start == 0.3 and w.end == 0.9
+    assert [w.text for w in t.words] == ["good", "added"]
+    assert t.words[0].start == 0.3 and t.words[0].end == 0.9
+    assert t.words[1].start == 0.9 and t.words[1].end == 1.4   # inferred after "good"
 
 
 def test_save_load_roundtrip(tmp_path):
