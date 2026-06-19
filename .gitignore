@@ -35,3 +35,10 @@ overlays/*
 # Scratch
 _aria_extract/
 manifests/*.state.json
+
+# Cleanup quarantine (scripts/clean_outputs.ps1 stages regenerable renders here)
+_cleanup_quarantine/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
