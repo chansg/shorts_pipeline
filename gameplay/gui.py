@@ -218,7 +218,8 @@ def _preview_hook(text, voice):
 def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
                 reframe_mode=None, x_off=None, y_off=None, fill_frac=None,
                 censor=None, censor_audio_mode=None,
-                hook_enabled=False, hook_text="", hook_voice=""):
+                hook_enabled=False, hook_text="", hook_voice="",
+                caption_mode=None, caption_offset=None):
     overlay_name = None if overlay_choice in (None, "", _NONE) else overlay_choice
     return ManualOptions(
         effects=list(effects or []),
@@ -238,12 +239,16 @@ def _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
         hook_enabled=bool(hook_enabled),
         hook_text=hook_text or "",
         hook_voice=hook_voice or "",
+        caption_mode=caption_mode or gconf.CAPTION_CHUNK_MODE,
+        caption_offset=gconf.CAPTION_OFFSET_S if caption_offset is None
+        else float(caption_offset),
     )
 
 
 def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
               dur, font, posy, reframe_mode, x_off, y_off, fill_frac,
-              censor, censor_audio_mode, hook_enabled, hook_text, hook_voice):
+              censor, censor_audio_mode, hook_enabled, hook_text, hook_voice,
+              caption_mode, caption_offset):
     if not clip_name:
         raise gr.Error("Transcribe a clip first.")
     clip = GameplayClip(clip_name)
@@ -255,7 +260,7 @@ def _do_build(clip_name, rows, spk_rows, effects, overlay_choice, pos, start,
                        "rows) before building.")
     opts = _build_opts(effects, overlay_choice, pos, start, dur, font, posy, spk_rows,
                        reframe_mode, x_off, y_off, fill_frac, censor, censor_audio_mode,
-                       hook_enabled, hook_text, hook_voice)
+                       hook_enabled, hook_text, hook_voice, caption_mode, caption_offset)
     # make the source of truth unambiguous: the build uses the CURRENT grid, edits included
     log: list[str] = [f"Using your edited transcript ({len(transcript.words)} rows)."]
     yield "\n".join(log)
@@ -358,8 +363,16 @@ def build_gameplay_tab() -> None:
             font_dd = gr.Dropdown(choices=["Anton", "Arial"],
                                   value=gconf.CAPTION_FONT, label="Caption font")
             posy_sl = gr.Slider(0.3, 0.9, value=gconf.CAPTION_POS_Y_FRAC, step=0.01,
-                                label="Caption Y (higher = lower; 0.82 reads on the "
+                                label="Caption Y (higher = lower; 0.72 reads on the "
                                       "fill layout, clear of the overlay)")
+        with gr.Row():
+            caption_mode_dd = gr.Dropdown(
+                choices=[("Phrase chunks (forgiving — recommended)", "phrase"),
+                         ("One word at a time (karaoke)", "word")],
+                value=gconf.CAPTION_CHUNK_MODE, label="Caption style")
+            caption_offset_sl = gr.Slider(
+                -1.0, 1.0, value=gconf.CAPTION_OFFSET_S, step=0.05,
+                label="Caption timing nudge (s; − earlier, + later)")
         with gr.Row():
             _ov_choices = [_NONE] + ov_mod.list_overlays()
             overlay_dd = gr.Dropdown(
@@ -453,6 +466,7 @@ def build_gameplay_tab() -> None:
                         overlay_dd, overlay_pos_dd, overlay_start_n, overlay_dur_n,
                         font_dd, posy_sl, reframe_mode_dd, cropx_sl, cropy_sl,
                         fillfrac_sl, censor_dd, censor_mode_dd,
-                        hook_enable_cb, hook_text_tb, hook_voice_tb]
+                        hook_enable_cb, hook_text_tb, hook_voice_tb,
+                        caption_mode_dd, caption_offset_sl]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)

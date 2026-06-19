@@ -49,6 +49,8 @@ class ManualOptions:
     hook_enabled: bool = False    # narrate an opening hook line over the start
     hook_text: str = ""           # the hook line (read aloud + captioned in NARRATOR colour)
     hook_voice: str = ""          # ElevenLabs voice id (blank = gconf.HOOK_VOICE)
+    caption_mode: str = gconf.CAPTION_CHUNK_MODE            # "phrase" (default) | "word"
+    caption_offset: float = gconf.CAPTION_OFFSET_S          # global lead(-)/lag(+) nudge (s)
 
 
 def _censor_audio(opts: "ManualOptions") -> bool:
@@ -74,10 +76,11 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
         play_w=gconf.WIDTH,
         play_h=gconf.HEIGHT,
         pos_y_frac=opts.caption_pos_y_frac,
-        words_per_cue=1,
+        words_per_cue=1,            # cues are pre-grouped by gameplay.captioning
         gap_fill=True,
-        max_gap=0.8,    # clear a held word across a long pause (matches lore look)
+        max_gap=gconf.CAPTION_MAX_GAP_S,   # bridge small gaps; hold briefly across big ones
         hold=0.4,
+        min_hold_s=gconf.CAPTION_MIN_DUR_S,  # minimum on-screen time (anti-flash)
         speaker_colors=speaker_colors,
         # gameplay defence in depth (noisy ASR): never wall the screen or overlap
         max_event_s=gconf.CAPTION_MAX_EVENT_S,
@@ -88,10 +91,14 @@ def caption_style(opts: ManualOptions) -> CaptionStyle:
 
 def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path,
                    hook: tuple | None = None) -> Path:
-    """Build the .ass from the transcript tuples. `hook=(text, dur, lead)` prepends the
-    NARRATOR-coloured hook words (shown during the narration) ahead of the normal
-    transcript captions, which are unchanged."""
-    tuples = transcript.to_tuples(mask=_censor_caption(opts))
+    """Build the .ass for the gameplay caption mode. "phrase" groups a few words per
+    cue (forgiving of ASR drift); "word" keeps one-word karaoke. A global
+    `caption_offset` nudges all transcript cues. `hook=(text, dur, lead)` prepends the
+    NARRATOR-coloured hook words (placed at t=0, not offset)."""
+    from gameplay import captioning
+    tuples = captioning.caption_cues(
+        transcript.words, mode=opts.caption_mode, offset=opts.caption_offset,
+        mask=_censor_caption(opts), mask_style=gconf.CENSOR_CAPTION_STYLE)
     if hook:
         from gameplay.hook import hook_caption_tuples
         text, dur, lead = hook

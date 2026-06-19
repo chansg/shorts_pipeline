@@ -72,7 +72,9 @@ WHISPERX_VAD_OFFSET = 0.363        # speech-end probability threshold (whisperx 
 # transcribed as 5 words. A smaller window forces several independent decodes and
 # recovers the speech (measured on a real clip: 30s->5 words, 8s->41 words). Lower =
 # more coverage but more fragmentation; ~6-10 is the sweet spot for noisy game audio.
-WHISPERX_CHUNK_SIZE = 8
+# Measured on a dense 28.6s ARAM clip: at 8 the batched decoder gave up inside covered
+# chunks (only 30 words despite 92% VAD coverage); 6 recovered 64 words (2.1x), 4 -> 49.
+WHISPERX_CHUNK_SIZE = 6
 
 # Audio prep before WhisperX: force a clean 16k-mono downmix and lift the voice over
 # game audio (better VAD + ASR SNR). whisperx.load_audio already downmixes to 16k
@@ -141,6 +143,20 @@ DEFAULT_SPEAKER_ROWS = 2
 # Render-side defence in depth (independent of the ASR clamp above):
 CAPTION_MAX_EVENT_S = 1.2        # no single caption stays on screen longer than this
 CAPTION_MAX_LINE_CHARS = 12      # wrap/hard-split so no line exceeds the frame width
+
+# --- Caption timing/chunking (gameplay/captioning.py) ---
+# Strict one-word-at-a-time karaoke magnifies any per-word ASR drift and reads as
+# broken when words are sparse. "phrase" mode groups a few words into one cue that
+# holds for the span of its words — far more forgiving of drift and easier to read on
+# a phone. "word" keeps the one-word karaoke. Gameplay default is "phrase"; lore is
+# unaffected.
+CAPTION_CHUNK_MODE = "phrase"       # "phrase" (default) | "word"
+CAPTION_CHUNK_MAX_WORDS = 4         # max words per phrase cue
+CAPTION_CHUNK_MAX_WINDOW_S = 1.2    # max time span a phrase cue covers (s)
+CAPTION_CHUNK_MAX_CHARS = 22        # start a new cue past this many chars
+CAPTION_MIN_DUR_S = 0.4             # minimum on-screen time per cue (anti-flash)
+CAPTION_MAX_GAP_S = 0.8             # bridge gaps smaller than this (don't blink off)
+CAPTION_OFFSET_S = 0.0             # global lead(-)/lag(+) nudge for residual drift (s)
 
 # --- Profanity censor (gameplay/censor.py) ---
 # Bleep/mute the audio AND mask the caption on curse words, driven off the WhisperX

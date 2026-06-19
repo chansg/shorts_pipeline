@@ -201,8 +201,11 @@ of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
   against dropout. WhisperX merges contiguous speech into windows decoded in one
   batched pass; its default (30s) lets a long talking run become a single window the
   model abandons after a few words (measured: 26s of chatter → **5 words**). A smaller
-  window (default **8s**) forces several independent decodes → **41 words** on the same
-  clip. Lower = more coverage, more fragmentation.
+  window forces several independent decodes. On a dense 28.6s ARAM clip — VAD already
+  covering 92% — the decoder still gave up *inside* the covered windows at 8s (**30
+  words**); **6s** recovered **64 words** (2.1×), 4s over-fragmented back to 49. So the
+  default is **6**. Lower = more coverage, more fragmentation. (Re-transcribe an
+  existing clip to benefit — a cached `transcript.json` is not re-cut automatically.)
 - **VAD** sensitivity is exposed as `WHISPERX_VAD_ONSET` / `WHISPERX_VAD_OFFSET`
   (lower onset = recover more speech, at the risk of decoding loud non-speech).
 - **Language** — `WHISPERX_LANGUAGE` (default `"en"`) pins the transcription language.
@@ -248,8 +251,33 @@ Built Shorts are encoded for phone sharpness via one shared helper
   - `blur_pad` — full frame centred over a blurred fill (no crop; the old default).
   - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`.
 
-  With `fill`, captions default to `CAPTION_POS_Y_FRAC` 0.82 — a readable lower band
-  that clears the bottom-centre like/subscribe overlay.
+  With `fill`, captions default to `CAPTION_POS_Y_FRAC` 0.72 — a readable lower band
+  that sits **above** the centred (~0.84) like/subscribe overlay, so caption and banner
+  never fight the game's centre HUD or each other. It's a GUI slider per build.
+
+### Caption timing & chunking
+
+Captions can only be as good as the transcript, and strict one-word-at-a-time karaoke
+*magnifies* any residual ASR drift — sparse words flash in and out and read as broken.
+Gameplay captions are therefore **phrase-chunked** by `gameplay/captioning.py`, a pure
+transform over the word list (the renderer and the `(text,start,end,speaker)` contract
+are unchanged):
+
+- **`CAPTION_CHUNK_MODE`** — `"phrase"` *(default)* groups consecutive same-speaker words
+  into one cue that holds for the span of its words; `"word"` keeps the classic one-word
+  karaoke. A GUI **Caption style** dropdown picks per build.
+- A phrase is capped at **`CAPTION_CHUNK_MAX_WORDS`** (4), **`CAPTION_CHUNK_MAX_WINDOW_S`**
+  (1.2s span), and **`CAPTION_CHUNK_MAX_CHARS`** (22) so it stays readable on a phone.
+- **`CAPTION_MIN_DUR_S`** (0.4) is the minimum on-screen time per cue (anti-flash) and
+  **`CAPTION_MAX_GAP_S`** (0.8) bridges small gaps so a cue doesn't blink off between
+  words — both applied by the renderer via `CaptionStyle` (`min_hold_s` / `max_gap`).
+- **`CAPTION_OFFSET_S`** (0, a GUI slider) is a global lead(−)/lag(+) nudge — a
+  calibration safety valve if a small systematic drift remains after the ASR fixes.
+
+Timing itself comes straight from WhisperX **word-level alignment** (wav2vec2), not
+segment times distributed evenly — verified by test. There is no trim between transcribe
+and burn (source and reframe share the timeline), so captions carry no constant offset.
+Lore captions are untouched (they use the renderer directly, not this transform).
 
 ### Profanity censor
 
