@@ -323,11 +323,16 @@ default; per-build toggle in the gameplay tab.
   `HOOK_VOICE` = the lore pipeline's ElevenLabs voice) and **Preview voice**. The TTS
   reuses the lore ElevenLabs client and is **cached by (line, voice)** — re-builds and
   repeat previews don't re-bill.
-- The narration plays from the start; the **game audio ducks** to `DUCK_LEVEL` (0.25)
-  under it and **swells back** to full over `DUCK_RELEASE_S` (0.3 s) once the line ends.
+- The narration plays from the start; while she speaks the **game bed is muted +
+  muffled** (gain `HOOK_MUTE_GAIN` 0.05 through a `HOOK_MUFFLE_HZ` 500 Hz low-pass — a
+  dull, quiet murmur, not just a duck) so the voice is clean, then it **swells back** to
+  full over `DUCK_RELEASE_S` (0.3 s) once the line ends.
 - The hook is captioned in its own reserved **NARRATOR colour** (`NARRATOR_CAPTION_COLOR`,
-  cyan); the normal transcript captions are unchanged. Hook caption timings are
-  distributed evenly across the narration (no per-word ElevenLabs timings).
+  cyan), and **game-speech captions are paused** for the narration window — a word that
+  falls under the hook is dropped so nothing renders on top of the hook caption (the bed
+  is inaudible there anyway). Normal transcript captions resume the moment she finishes.
+  Hook caption timings are distributed evenly across the narration (no per-word
+  ElevenLabs timings).
 - It rides the **same final encode** as captions/effects/censor — **zero extra passes**
   (censor + duck/mix compose into one audio graph). If ElevenLabs errors, the build
   completes **without** narration and logs why. Manual mode only.

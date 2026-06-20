@@ -26,9 +26,11 @@ def test_hook_caption_tuples_lead_and_empty():
 
 def test_duck_mix_graph_contents():
     g = hook.duck_mix_graph("[0:a]", 1.2, duck=0.25, release=0.3)
-    assert "amix=inputs=2" in g and "volume='if(lt(t," in g
+    # mute+muffle: split bed -> dry + low-passed wet leg + narration, summed
+    assert "asplit=2" in g and "amix=inputs=3" in g
+    assert "volume='if(lt(t," in g and "lowpass=f=" in g
     assert "[1:a]" in g and g.endswith("[a]")
-    assert "0.25" in g                                  # duck level in the expr
+    assert "0.25" in g                                  # wet (muffle) gain in the expr
 
 
 # ---- TTS cache (mock the ElevenLabs client) --------------------------------
@@ -80,6 +82,22 @@ def test_write_captions_prepends_narrator_coloured_hook():
     assert "HELLO" in text.upper() and "GAMEPLAY" in text.upper()
     # hook line is at the top of [Events] (t=0), the transcript word later (t=5)
     assert text.index("HELLO") < text.index("GAMEPLAY")
+
+
+def test_hook_suppresses_overlapping_transcript_captions():
+    import tempfile
+    from gameplay.manual import ManualOptions, write_captions
+    from gameplay.transcript import Transcript, Word
+    # a word that falls UNDER the 2s narration must not appear (it'd overlap the hook
+    # caption while the bed is muted); a word after the narration must still appear.
+    t = Transcript([Word("sneaky", 0.8, 1.5, "S0"), Word("payoff", 3.0, 3.4, "S0")])
+    with tempfile.TemporaryDirectory() as d:
+        text = write_captions(t, ManualOptions(), Path(d) / "c.ass",
+                              hook=("hi there", 2.0, 0.0)).read_text("utf-8")
+    # inspect only the dialogue events, not the ASS header
+    events = text.upper().split("[EVENTS]", 1)[1]
+    assert "SNEAKY" not in events             # dropped — it was under the narration
+    assert "PAYOFF" in events and "HI" in events   # post-hook word + hook caption remain
 
 
 def test_write_captions_without_hook_is_unchanged():
@@ -134,6 +152,6 @@ def test_censor_and_hook_compose_in_one_graph(tmp_path, monkeypatch):
     encodes = [c for c in cmds if "libx264" in c]
     assert len(encodes) == 1                             # ONE final encode, no extra pass
     fc = encodes[0][encodes[0].index("-filter_complex") + 1]
-    assert "amix=inputs=2" in fc                          # hook duck/mix
+    assert "amix=inputs=3" in fc                          # hook mute+muffle/mix
     assert "sine=frequency=" in fc or "volume=0:enable=" in fc   # censor (bleep)
     assert "-i" in encodes[0]                             # the narration input was added

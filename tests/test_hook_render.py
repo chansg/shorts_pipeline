@@ -64,6 +64,32 @@ def test_burn_ducks_bed_under_hook_in_one_pass(tmp_path):
     assert inside < after * 0.5, f"bed not ducked: in={inside:.3f} after={after:.3f}"
 
 
+def _reframed_with_hifreq_bed(path, dur=4.0):
+    # a HIGH-frequency bed (3 kHz) so the muffle low-pass (500 Hz) is what attenuates it.
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc2=size=1080x1920:rate=30:duration={dur}",
+         "-f", "lavfi", "-i", f"sine=frequency=3000:duration={dur}",
+         "-ac", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+         "-shortest", str(path)], check=True, capture_output=True)
+
+
+def test_bed_is_muffled_during_the_hook(tmp_path):
+    # Isolate the MUFFLE from the mute: duck=1.0 (no attenuation), so only the low-pass
+    # acts. A 3 kHz bed is heavily cut DURING the line and full AFTER it.
+    src = tmp_path / "reframed.mp4"
+    _reframed_with_hifreq_bed(src)
+    silent = tmp_path / "silent.wav"
+    _wav(silent, "anullsrc=r=24000:cl=mono", 1.2)
+    ass = tmp_path / "c.ass"
+    ass.write_text(build_ass([("hi", 0.0, 0.3)]), encoding="utf-8")
+    graph = hook.duck_mix_graph("[0:a]", 1.2, duck=1.0, release=0.3, muffle_hz=500)
+    out = burn_captions(src, ass, tmp_path / "out.mp4",
+                        audio_graph=graph, audio_inputs=["-i", str(silent)])
+    inside = _rms(out, 0.2, 1.0)
+    after = _rms(out, 2.0, 3.0)
+    assert inside < after * 0.5, f"bed not muffled: in={inside:.3f} after={after:.3f}"
+
+
 def test_narration_audible_over_the_dip(tmp_path):
     src = tmp_path / "reframed.mp4"
     _reframed_with_bed(src)

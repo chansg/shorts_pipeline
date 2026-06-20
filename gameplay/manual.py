@@ -102,6 +102,11 @@ def write_captions(transcript: Transcript, opts: ManualOptions, ass_path: Path,
     if hook:
         from gameplay.hook import hook_caption_tuples
         text, dur, lead = hook
+        hook_end = lead + dur
+        # The game bed is muted+muffled while she speaks, so its speech isn't audible —
+        # drop any game-speech cue that overlaps the narration window so it doesn't
+        # render ON TOP of the hook caption (the reported overlapping characters).
+        tuples = [t for t in tuples if not (t[2] > lead and t[1] < hook_end)]
         tuples = hook_caption_tuples(text, dur, lead) + list(tuples)
     ass_path.write_text(build_ass(tuples, caption_style(opts)), encoding="utf-8")
     return ass_path
@@ -221,7 +226,8 @@ def run_manual(clip: GameplayClip, transcript: Transcript, opts: ManualOptions,
                                                  opts.hook_voice or None, clip.dir)
             hook = (wav, hdur)
             yield {"msg": f"     Hook: {hdur:.1f}s narration over the opening "
-                          f"(game audio ducks to {gconf.DUCK_LEVEL})."}
+                          f"(game audio muted + muffled, captions paused until she "
+                          f"finishes)."}
         except Exception as e:        # noqa: BLE001 — degrade, never fail the render
             yield {"msg": f"     ⚠ Hook TTS failed ({type(e).__name__}: {e}); "
                           f"building WITHOUT narration."}

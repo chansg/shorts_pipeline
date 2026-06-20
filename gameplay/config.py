@@ -202,9 +202,14 @@ CENSOR_ALLOWLIST = [             # whole words that must NEVER be censored
 NARRATED_HOOK_ENABLED = False    # documents the default; the real control is per-build
 HOOK_VOICE = _lore.ELEVENLABS_VOICE_ID   # default = the lore pipeline's voice
 HOOK_LEAD_IN_S = 0.0             # tiny pad before the narration starts
-DUCK_LEVEL = 0.25               # game-audio volume under the narration (0..1)
+DUCK_LEVEL = 0.25               # (legacy duck level; superseded by mute+muffle below)
 DUCK_RELEASE_S = 0.3            # ramp back to full over this many seconds after the line
 NARRATOR_CAPTION_COLOR = (0, 229, 255)   # reserved cyan — the hook caption's colour
+# While she speaks the game bed is MUTED + MUFFLED (not merely ducked) so the narration
+# is clean, then it swells back over DUCK_RELEASE_S. Game-speech captions are also
+# suppressed during the narration so nothing overlaps the hook caption on screen.
+HOOK_MUTE_GAIN = 0.05            # near-silent bed gain under the narration (0..1)
+HOOK_MUFFLE_HZ = 500             # low-pass cutoff applied to the bed under the narration
 
 # --- Effects (starter set; the registry in effects.py is built to extend) ---
 PUNCH_ZOOM_AMOUNT = 0.08    # 1.0 -> 1.08 push on a beat
