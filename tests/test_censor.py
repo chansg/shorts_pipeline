@@ -156,3 +156,17 @@ def test_coerce_censor_grid_makes_new_row_a_real_bool():
     assert isinstance(out[0][4], bool) and out[0][4] is False  # clean -> empty checkbox
     # idempotent: a second pass is a no-op (so the .change loop settles)
     assert _coerce_censor_grid(out) == out
+
+
+def test_coerce_censor_change_skips_when_already_coerced():
+    import gradio as gr
+    from gameplay.gui import _coerce_censor_change
+    # a row whose censor cell is still text ("") -> writes the coerced grid (so the
+    # checkbox renders); a fully-coerced grid -> gr.skip() so the change can't loop.
+    wrote = _coerce_censor_change([["aim", "S0", 7.4, 7.7, ""]])
+    assert wrote == [["aim", "S0", 7.4, 7.7, False]]           # text -> real bool
+    assert _coerce_censor_change(wrote) == gr.skip()           # already coerced -> skip
+    # an auto-flagged word is written once, then settles
+    w2 = _coerce_censor_change([["bullshit", "", 0, 0, False]])
+    assert w2[0][4] is True
+    assert _coerce_censor_change(w2) == gr.skip()

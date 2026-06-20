@@ -173,6 +173,20 @@ def _coerce_censor_grid(rows):
     return out
 
 
+def _coerce_censor_change(rows):
+    """transcript_df.change handler: coerce the censor column, but return gr.skip()
+    when the grid is ALREADY fully coerced (every censor cell a real bool, no auto-flag
+    to add). Echoing an unchanged grid back to the same component is what risks a
+    re-render/request loop, so we only write when something actually changes — the
+    coercion then converges in one step."""
+    coerced = _coerce_censor_grid(rows)
+    raw = [list(r) for r in Transcript._normalise_grid(rows)]
+    already = (len(raw) == len(coerced) and all(
+        len(r) == 5 and isinstance(r[4], bool) and r == c
+        for r, c in zip(raw, coerced)))
+    return gr.skip() if already else coerced
+
+
 def _swatches_md(spk_rows) -> str:
     """Inline speaker→colour chips so the mapping is visible while editing."""
     chips = []
@@ -340,11 +354,12 @@ def build_gameplay_tab() -> "gr.Video":
             type="array", interactive=True, label="Transcript (editable)",
             row_count=(1, "dynamic"),
             # Give the words room and keep the numeric/flag columns tight; wrap long
-            # phrases, cap the height so a long transcript scrolls instead of pushing
-            # the build controls off-screen, and show row numbers + a search box (the
-            # bulk-edit "Rows"/"Split row #" controls below reference these numbers).
+            # phrases and cap the height so a long transcript scrolls instead of pushing
+            # the build controls off-screen. (show_search / show_row_numbers are NOT used:
+            # they pollute the change-event payload and, with the censor coercion handler
+            # below echoing the grid back, caused a 422 request storm — see git history.)
             column_widths=["40%", "20%", "12%", "12%", "16%"],
-            wrap=True, max_height=460, show_row_numbers=True, show_search="search")
+            wrap=True, max_height=460)
         with gr.Row():
             reload_grid_btn = gr.Button("↺ Revert grid to last transcribe", scale=0,
                                         size="sm")
@@ -352,7 +367,7 @@ def build_gameplay_tab() -> "gr.Video":
                 "Click a cell to edit. **censor** flags a word for the bleep + caption "
                 "mask — tick to censor, untick a false positive (profanity auto-flags). "
                 "Right-click a row to insert/delete; new rows with blank `start`/`end` "
-                "are timed automatically. Use the search box to jump to a word.")
+                "are timed automatically.")
         speaker_swatch_md = gr.Markdown()        # inline speaker→colour chips
         speaker_df = gr.Dataframe(
             headers=["speaker", "color (hex)"], datatype=["str", "str"],
@@ -474,8 +489,9 @@ def build_gameplay_tab() -> "gr.Video":
         # keep the inline colour swatches in sync as the user edits the colour grid
         speaker_df.change(_swatches_md, speaker_df, speaker_swatch_md)
         # a right-click-added row's censor cell renders as a text box until it holds a
-        # real bool; coerce it on every change so the checkbox appears and is tickable
-        transcript_df.change(_coerce_censor_grid, transcript_df, transcript_df)
+        # real bool; coerce it on change so the checkbox appears — but skip the write
+        # once the grid is already coerced, so the event can't loop (no 422 storm)
+        transcript_df.change(_coerce_censor_change, transcript_df, transcript_df)
         # discard accidental grid edits and reload from the saved transcript.json
         reload_grid_btn.click(_load_editor, clip_state,
                               [transcript_df, speaker_df, editor_md, speaker_swatch_md])
