@@ -335,7 +335,53 @@ drive per-speaker colour (explicit hex wins; otherwise a 6-colour palette is
 auto-assigned in order of appearance). The bundled **Anton** font is used the same
 way (via `fontsdir`).
 
-## Full-Auto Experiment (its own landing entry — 16:9 YouTube output)
+## Full-Auto: Highlight clips → manual (audio-reaction + HUD)
+
+The headline full-auto flow takes a **lengthy gameplay VOD** (hours of League/ARAM,
+NVIDIA captures) and returns **ranked candidate clips**, each a **generous raw 9:16
+segment** you then refine in the Gaming tab. It targets **funny / rage** moments scored
+from **voice reactions + HUD events**, and needs **no transcript or LLM** — so it's
+robust and fast. (`fullauto/reaction.py`, `fullauto/hud.py`, `fullauto/clips.py`.)
+
+**Design: audio reaction LEADS, HUD CONFIRMS.**
+
+1. **Audio reaction (robust core).** The mixed mono track is **streamed** through ffmpeg
+   (never fully decoded — handles hours within bounded memory), band-passed to the
+   **vocal range** (`REACTION_BAND_HZ` ~300–3400 Hz), and folded to a per-window RMS.
+   Each window is scored by **suddenness above a rolling baseline** — an **onset/attack**
+   term (`REACTION_ONSET_WEIGHT`) dominates a sustained-energy term, so a sharp “WHAT?!”
+   outscores a long teamfight roar (gradual onset; the baseline catches up). Peaks above
+   `REACTION_THRESHOLD`, spaced so one reaction = one peak.
+2. **Generous windows.** Each peak frames `[t − PRE_ROLL_S, t + POST_ROLL_S]` — **anchored
+   before the spike** (setup + payoff) — and overlapping windows **merge** (so a long fight
+   is one candidate, not five). Capped to `MAX_CANDIDATES` (recall-biased: surface more,
+   you're the final judge).
+3. **HUD scan (isolated, fail-safe booster).** *Within each window only* (cheap), frames
+   are sampled and League HUD ROIs (`HUD_ROIS`) read for kill-feed / multikill / ace
+   banners. Events add a boost (`final = audio_score × (1 + hud_boost)`; penta > quad >
+   … > single). The **entire scan is wrapped** so any failure (no OCR backend, an ffmpeg
+   hiccup) yields no events and the audio candidate stands — and `HUD_SCAN_ENABLED=False`
+   skips it. A multikill with no reaction never outranks a reaction with no HUD.
+4. **Rank → export → manifest.** Candidates are cut + reframed to 9:16 reusing the shared
+   `gameplay.reframe`/`encode` (one source of truth — no captions/effects/overlay; those
+   come later in manual), and each is dropped in as a **GameplayClip** the Gaming tab can
+   open. A `candidates.json` records rank, score, audio-score, HUD events, window, and
+   paths so the GUI lists each candidate **with why it was picked**.
+
+In the GUI: upload the VOD, tune the knobs (threshold, pre/post-roll, max, HUD on/off),
+**① Detect highlight clips** (the log prints the **score curve** for calibration), then
+pick a candidate and **② Refine in manual mode →** loads it straight into the Gaming
+uploader.
+
+> **Calibration WILL be needed on real footage.** The detector is tuned on synthetic
+> audio; the live thresholds are yours to dial. If candidates are **sparse**, lower
+> `REACTION_THRESHOLD` (watch the logged score curve — aim for the threshold to sit
+> below the reaction peaks but above chatter). If **teamfights leak in**, raise
+> `REACTION_ONSET_WEIGHT` or the threshold. Widen clips with `PRE_ROLL_S`/`POST_ROLL_S`.
+> HUD ROIs are 1080p defaults — adjust per capture resolution. The GPU/long-run pass on
+> real captures is yours; the unit tests cover the detection logic on synthetic signals.
+
+## Full-Auto Experiment (16:9 YouTube output — the older flow)
 
 The experimental long-form processor is its **own card on the landing screen**
 (marked ⚗ EXPERIMENTAL), separate from Gaming. Its output is a **standard 16:9

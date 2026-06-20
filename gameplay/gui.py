@@ -307,9 +307,10 @@ def _refresh_overlays():
 
 # ---- tab layout ------------------------------------------------------------
 
-def build_gameplay_tab() -> None:
+def build_gameplay_tab() -> "gr.Video":
     """Create the Gameplay tab. Must be called inside the app's gr.Blocks/gr.Tabs
-    context. All components and handler wiring are local to this function."""
+    context. All components and handler wiring are local to this function. Returns the
+    clip uploader so the full-auto tab can load a candidate into it."""
     with gr.Tab("🎮 Gameplay"):
         clip_state = gr.State("")
         gr.Markdown(
@@ -493,3 +494,7 @@ def build_gameplay_tab() -> None:
                         caption_mode_dd, caption_offset_sl]
         build_btn.click(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
+
+        # exposed so the full-auto tab can hand a detected candidate straight into this
+        # uploader ("Refine in manual mode") — the cross-tab wiring lives in app.py.
+        return clip_video

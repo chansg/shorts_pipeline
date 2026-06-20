@@ -1128,7 +1128,7 @@ def build_app() -> gr.Blocks:
             # Second, parallel pipeline (gameplay clips). Self-contained in
             # gameplay/gui.py; the lore wizard is untouched.
             from gameplay.gui import build_gameplay_tab
-            build_gameplay_tab()
+            gaming_clip_video = build_gameplay_tab()
 
         # ---- Full-Auto Experiment (its own mode; 16:9 YouTube output) ----
         with gr.Column(visible=False, elem_id="mode-fullauto") as fullauto_view:
@@ -1140,7 +1140,7 @@ def build_app() -> gr.Blocks:
             # Experimental long-form processor — its own package; exports a 16:9
             # YouTube video and never touches the 9:16 Shorts backend.
             from fullauto.gui import build_fullauto_view
-            build_fullauto_view()
+            fullauto_handles = build_fullauto_view(manual_clip_video=gaming_clip_video)
 
         # ---- Settings (shared — reachable from all modes) ----
         with gr.Column(visible=False, elem_id="mode-settings") as settings_view:
@@ -1327,6 +1327,16 @@ def build_app() -> gr.Blocks:
         fullauto_settings_btn.click(lambda: "fullauto", None, prev_mode) \
             .then(lambda: _route("settings"), None, nav)
         settings_back_btn.click(lambda p: _route(p), prev_mode, nav)
+
+        # Full-auto "Refine in manual mode": load the chosen candidate's raw clip into
+        # the Gameplay uploader, then route to the Gaming tab so it's one click.
+        if fullauto_handles.get("refine_btn") is not None and gaming_clip_video is not None:
+            from fullauto.gui import _refine_source_for
+            fullauto_handles["refine_btn"].click(
+                _refine_source_for,
+                [fullauto_handles["video"], fullauto_handles["dd"]],
+                gaming_clip_video) \
+                .then(lambda: _route("gaming"), None, nav)
     return demo
 
 

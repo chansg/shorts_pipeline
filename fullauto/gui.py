@@ -16,6 +16,7 @@ import gradio as gr
 
 from orchestrator.errors import FriendlyError, friendly
 from fullauto import pipeline as ap
+from fullauto import clips as clip_mod
 from gameplay import config as gconf
 from gameplay.state import AutoSession
 
@@ -96,11 +97,117 @@ def _build_youtube(video, selected):
         raise gr.Error(str(friendly(e)), duration=None)
 
 
+# ---- highlight-clips flow (audio-reaction + HUD -> 9:16 raw candidates) -----
+
+def _clip_label(c) -> str:
+    hud = ("+".join(c.hud_events) if c.hud_events else "no HUD")
+    return f"{c.rank} · {c.start:.0f}-{c.end:.0f}s · score {c.score:.2f} · {hud}"
+
+
+def _do_detect_clips(video, threshold, pre_roll, post_roll, max_candidates, hud_on):
+    """Run audio-reaction (+ optional HUD) detection over a long video and export
+    ranked 9:16 raw candidates. Streams the staged log; persists candidates.json."""
+    if not video:
+        raise gr.Error("Upload a long video first.")
+    # apply the per-run knobs (calibration surface) before detecting
+    gconf.REACTION_THRESHOLD = float(threshold)
+    gconf.PRE_ROLL_S = float(pre_roll)
+    gconf.POST_ROLL_S = float(post_roll)
+    captured: list[str] = []
+    try:
+        clip_mod.run_highlight_detection(
+            video, hud_enabled=bool(hud_on), max_candidates=int(max_candidates),
+            progress=captured.append)
+    except FriendlyError as fe:
+        raise gr.Error(str(fe), duration=None)
+    except Exception as e:                       # noqa: BLE001
+        raise gr.Error(str(friendly(e)), duration=None)
+    yield "\n".join(captured)
+
+
+def _load_clips_ui(video):
+    """Populate the gallery / table / refine selector from the persisted manifest."""
+    empty = gr.update(choices=[], value=None)
+    if not video:
+        return [], [], empty
+    session = AutoSession(Path(video).stem)
+    cands = clip_mod.load_manifest(session)
+    gallery, rows, labels = [], [], []
+    for c in cands:
+        label = _clip_label(c)
+        labels.append(label)
+        rows.append([c.rank, f"{c.start:.0f}-{c.end:.0f}s", c.duration,
+                     round(c.score, 2), round(c.audio_score, 2),
+                     "+".join(c.hud_events) or "—", c.why])
+        if c.preview_path and Path(c.preview_path).exists():
+            gallery.append((c.preview_path, label))
+    return gallery, rows, gr.update(choices=labels, value=(labels[0] if labels else None))
+
+
+def _refine_source_for(video, label):
+    """Resolve the chosen candidate label to its source clip path (the manual input)."""
+    if not video or not label:
+        return None
+    session = AutoSession(Path(video).stem)
+    for c in clip_mod.load_manifest(session):
+        if _clip_label(c) == label:
+            return c.source_path or c.clip_path or None
+    return None
+
+
 # ---- view layout -----------------------------------------------------------
 
-def build_fullauto_view() -> None:
-    """Create the Full-Auto tab. Must be called inside the app's gr.Blocks/gr.Tabs
-    context. All components and handler wiring are local to this function."""
+def build_fullauto_view(manual_clip_video=None) -> dict:
+    """Create the Full-Auto container's tabs. Returns the hand-off handles
+    {refine_btn, refine_video, refine_dd} so app.py can wire 'Refine in manual mode'
+    into the Gameplay uploader (`manual_clip_video`) and route to that tab."""
+    handles: dict = {}
+    with gr.Tab("🎯 Highlight clips → manual"):
+        gr.Markdown(
+            "### Long video → ranked 9:16 candidate clips\n"
+            "Drop in a lengthy gameplay VOD (hours of League/ARAM). Detection finds "
+            "**funny / rage** moments from **voice reactions** (a sudden “WHAT?!”), "
+            "with League **HUD events** (multikills / aces) as a score booster, and "
+            "exports each as a **generous raw 9:16 clip** to refine in the Gameplay "
+            "tab. No transcript/LLM needed — robust and fast. Thresholds are a "
+            "calibration surface; the log shows the score curve.")
+        hl_video = gr.Video(label="Long video (gameplay VOD / NVIDIA capture)")
+        with gr.Row():
+            hl_threshold = gr.Slider(0.05, 0.9, value=gconf.REACTION_THRESHOLD,
+                                     step=0.05, label="Reaction threshold (lower = more)")
+            hl_pre = gr.Slider(2, 20, value=gconf.PRE_ROLL_S, step=1,
+                               label="Pre-roll (setup, s)")
+            hl_post = gr.Slider(2, 25, value=gconf.POST_ROLL_S, step=1,
+                                label="Post-roll (payoff, s)")
+            hl_max = gr.Slider(3, 40, value=gconf.MAX_CANDIDATES, step=1,
+                               label="Max candidates")
+            hl_hud = gr.Checkbox(value=gconf.HUD_SCAN_ENABLED,
+                                 label="HUD scan (booster; safe to fail)")
+        hl_detect_btn = gr.Button("① Detect highlight clips", variant="primary")
+        hl_status = gr.Textbox(label="Detection log (score curve + ranking)",
+                               lines=10, interactive=False)
+        hl_gallery = gr.Gallery(label="Candidate previews", columns=4, height=240,
+                                object_fit="contain")
+        hl_df = gr.Dataframe(
+            headers=["#", "window", "dur", "score", "audio", "HUD", "why"],
+            type="array", interactive=False, label="Ranked candidates")
+        with gr.Row():
+            hl_refine_dd = gr.Dropdown(choices=[], label="Pick a candidate to refine")
+            hl_refine_btn = gr.Button("② Refine in manual mode →", variant="primary")
+        hl_refine_video = gr.Video(label="Selected candidate (raw 9:16 preview)")
+
+        hl_detect_btn.click(
+            _do_detect_clips,
+            [hl_video, hl_threshold, hl_pre, hl_post, hl_max, hl_hud],
+            hl_status) \
+            .then(_load_clips_ui, hl_video, [hl_gallery, hl_df, hl_refine_dd])
+        # preview the chosen candidate's 9:16 clip when the selector changes
+        hl_refine_dd.change(
+            lambda v, l: (_refine_source_for(v, l) or None), [hl_video, hl_refine_dd],
+            hl_refine_video)
+        handles = {"refine_btn": hl_refine_btn, "video": hl_video, "dd": hl_refine_dd,
+                   "manual_target": manual_clip_video}
+
     with gr.Tab("⚗ Full-Auto"):
         gr.Markdown(
             "### Long video → 16:9 YouTube highlights\n"
@@ -148,3 +255,5 @@ def build_fullauto_view() -> None:
         # build the selected highlights into one 16:9 YouTube video
         auto_build_btn.click(_build_youtube, [auto_video, auto_select_cbg],
                              [build_status, result_video])
+
+    return handles

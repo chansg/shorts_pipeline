@@ -288,3 +288,52 @@ AUTO_TOP_N = 15                 # cap on surviving candidates after dedupe
 AUTO_TRANSCRIBE_BATCH = 8       # whisperx batch for long videos (safe default)
 AUTO_TRANSCRIBE_BATCH_OOM = 4   # retry batch after a CUDA OOM (once)
 AUTO_MAX_MINUTES = 60           # warn (don't block) past this length
+
+# ============================================================================
+# Full-auto HIGHLIGHT CLIPS — audio-reaction-led detection -> ranked 9:16 raw
+# candidates for manual refinement (the 3rd-button flow). No transcript/LLM needed:
+# AUDIO REACTION LEADS (robust, streamed) and HUD events CONFIRM (a score booster
+# that is allowed to fail). Distinct from the LLM/16:9 YouTube path above.
+#
+# Detection WILL need calibration on real footage — the run logs the score curve.
+# If candidates are sparse: lower REACTION_THRESHOLD. If noisy/teamfights leak in:
+# raise REACTION_ONSET_WEIGHT (favour sharp exclamations over sustained roar) or
+# REACTION_THRESHOLD. Widen the clips with PRE_ROLL_S / POST_ROLL_S.
+# ============================================================================
+REACTION_WINDOW_S = 0.1            # per-window analysis resolution (s)
+REACTION_BAND_HZ = (300, 3400)     # vocal band-pass applied before scoring
+REACTION_BASELINE_WINDOW_S = 8.0   # rolling baseline (fire on SUDDEN vs recent chatter)
+REACTION_ONSET_WEIGHT = 0.65       # attack-sharpness vs sustained-energy weight (0..1)
+REACTION_THRESHOLD = 0.35          # min reaction score (0..1 vs baseline) for a peak
+REACTION_MIN_SPACING_S = 6.0       # one reaction = one peak (min peak spacing)
+REACTION_MAX_PEAKS = 80            # cap peaks before windowing
+REACTION_SR = 16000                # PCM sample rate for streamed analysis
+REACTION_BLOCK_SAMPLES = 1 << 20   # PCM stream block size (bounded memory, ~1M samples)
+
+PRE_ROLL_S = 8.0                   # generous setup BEFORE the spike (anchor before it)
+POST_ROLL_S = 10.0                 # payoff AFTER the spike
+MERGE_GAP_S = 3.0                  # merge windows within this gap into one candidate
+MAX_CANDIDATES = 20                # keep the highest-scoring N (recall-biased)
+
+# -- HUD event scan (League-specific, brittle; isolated + fail-safe booster) --
+HUD_SCAN_ENABLED = True            # master switch; off -> audio-only candidates
+HUD_SAMPLE_FPS = 1.0               # frames/sec sampled WITHIN a candidate window only
+HUD_BOOST_CAP = 1.5                # max total boost (final = audio_score * (1 + boost))
+HUD_EVENT_WEIGHTS = {              # boost contribution per detected HUD event kind
+    "pentakill": 1.0, "quadrakill": 0.8, "triplekill": 0.6, "doublekill": 0.4,
+    "ace": 0.7, "shutdown": 0.4, "kill": 0.25, "death": 0.3, "executed": 0.3}
+# 1080p HUD ROIs as (x, y, w, h) fractions of the frame — kill feed (top-right) and
+# the centre multikill/ace banner. Resolution-dependent; tune per capture layout.
+HUD_ROIS = {
+    "killfeed": (0.78, 0.18, 0.22, 0.30),
+    "banner":   (0.30, 0.20, 0.40, 0.18),
+}
+HUD_EVENT_LEXICON = {              # recognised HUD text (substring) -> canonical event
+    "penta kill": "pentakill", "pentakill": "pentakill",
+    "quadra kill": "quadrakill", "quadrakill": "quadrakill",
+    "triple kill": "triplekill", "triplekill": "triplekill",
+    "double kill": "doublekill", "doublekill": "doublekill",
+    "ace": "ace", "shut down": "shutdown", "shutdown": "shutdown",
+    "has slain": "kill", "slain an enemy": "kill", "you have slain": "kill",
+    "executed": "executed", "have been slain": "death", "was slain": "death",
+}
