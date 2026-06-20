@@ -338,14 +338,26 @@ def build_gameplay_tab() -> "gr.Video":
             headers=Transcript.HEADERS,          # text, speaker, start, end, censor
             datatype=["str", "str", "number", "number", "bool"],
             type="array", interactive=True, label="Transcript (editable)",
-            row_count=(1, "dynamic"))
-        gr.Markdown("Click a cell to edit. The **censor** checkbox flags a word for "
-                    "the bleep + caption mask — tick to censor, untick a false "
-                    "positive. `start`/`end` are seconds.")
+            row_count=(1, "dynamic"),
+            # Give the words room and keep the numeric/flag columns tight; wrap long
+            # phrases, cap the height so a long transcript scrolls instead of pushing
+            # the build controls off-screen, and show row numbers + a search box (the
+            # bulk-edit "Rows"/"Split row #" controls below reference these numbers).
+            column_widths=["40%", "20%", "12%", "12%", "16%"],
+            wrap=True, max_height=460, show_row_numbers=True, show_search="search")
+        with gr.Row():
+            reload_grid_btn = gr.Button("↺ Revert grid to last transcribe", scale=0,
+                                        size="sm")
+            gr.Markdown(
+                "Click a cell to edit. **censor** flags a word for the bleep + caption "
+                "mask — tick to censor, untick a false positive (profanity auto-flags). "
+                "Right-click a row to insert/delete; new rows with blank `start`/`end` "
+                "are timed automatically. Use the search box to jump to a word.")
         speaker_swatch_md = gr.Markdown()        # inline speaker→colour chips
         speaker_df = gr.Dataframe(
             headers=["speaker", "color (hex)"], datatype=["str", "str"],
             type="array", interactive=True, row_count=(1, "dynamic"),
+            column_widths=["62%", "38%"], wrap=True, max_height=220,
             label="Speaker colours (blank = auto palette; explicit hex wins)")
 
         # Bulk-edit tools — gameplay ASR/diarization is noisy, so correcting the
@@ -464,6 +476,9 @@ def build_gameplay_tab() -> "gr.Video":
         # a right-click-added row's censor cell renders as a text box until it holds a
         # real bool; coerce it on every change so the checkbox appears and is tickable
         transcript_df.change(_coerce_censor_grid, transcript_df, transcript_df)
+        # discard accidental grid edits and reload from the saved transcript.json
+        reload_grid_btn.click(_load_editor, clip_state,
+                              [transcript_df, speaker_df, editor_md, speaker_swatch_md])
 
         # transcript bulk-edit wiring (each returns updated grid rows + a status)
         edit_assign_btn.click(_edit_assign,

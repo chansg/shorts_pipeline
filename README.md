@@ -135,12 +135,17 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    one voice → single-speaker.
 3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
    (`SPEAKER_00` → "Chan") and pick their colours (shown as inline swatches).
-   *These rows are the captions.* Each row also has a **censor** checkbox
-   (auto-ticked from the word-list — see Profanity censor). The **Bulk edits &
-   caption preview** panel adds: multi-row speaker reassignment (fix a stretch the
-   diariser mislabelled), find/replace (a misheard name, fixed once), merge/split
-   rows, and a **Re-apply captions** preview that re-renders just the caption track
-   — no re-transcription.
+   *These rows are the captions.* The grid shows **1-based row numbers** (the
+   bulk-edit "Rows" / "Split row #" controls reference them), a **search box** to jump
+   to a word, **wrapped** text in a wider column with the numeric/flag columns kept
+   tight, and a bounded scroll height so a long transcript doesn't push the build
+   controls off-screen. Each row has a **censor** checkbox (auto-ticked from the
+   word-list — see Profanity censor); right-click inserts/deletes rows (new rows with
+   blank timing are timed automatically), and **↺ Revert grid** reloads the saved
+   transcript to discard accidental edits. The **Bulk edits & caption preview** panel
+   adds: multi-row speaker reassignment (fix a stretch the diariser mislabelled),
+   find/replace (a misheard name, fixed once), merge/split rows, and a **Re-apply
+   captions** preview that re-renders just the caption track — no re-transcription.
 4. Choose **effects** (punch-zoom / shake, driven off the audio-energy envelope),
    a **caption** font/position (default `0.78` sits in the lower blur band, off the
    HUD), and a **like/subscribe overlay** (asset, position, start, duration).
