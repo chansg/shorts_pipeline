@@ -2,6 +2,7 @@
 no OCR install: frame source + recognizer are injected. The whole point is that this
 booster NEVER blocks the robust audio candidate."""
 import numpy as np
+import pytest
 
 from fullauto import hud
 
@@ -34,6 +35,35 @@ def test_hud_boost_clamps_to_cap():
     evs = [hud.HudEvent("pentakill"), hud.HudEvent("ace"), hud.HudEvent("doublekill")]
     assert hud.hud_boost(evs, cap=1.5) == 1.5            # 1.0+0.7+0.4 -> capped
     assert hud.hud_boost([]) == 0.0
+
+
+def test_ocr_available_uses_config_path_when_file_exists(tmp_path, monkeypatch):
+    pytest.importorskip("pytesseract")
+    fake = tmp_path / "tesseract.exe"
+    fake.write_bytes(b"")                                  # a file that "exists"
+    monkeypatch.setattr(hud.gconf, "TESSERACT_CMD", str(fake))
+    hud._ocr_configured = False                            # force re-config
+    assert hud.ocr_available() is True
+    import pytesseract
+    assert pytesseract.pytesseract.tesseract_cmd == str(fake)   # pointed at our binary
+
+
+def test_ocr_available_falls_back_to_path_without_override(monkeypatch):
+    pytest.importorskip("pytesseract")
+    monkeypatch.setattr(hud.gconf, "TESSERACT_CMD", "Z:/nope/tesseract.exe")  # no file
+    monkeypatch.setattr(hud.shutil, "which", lambda n: "/usr/bin/tesseract")  # on PATH
+    hud._ocr_configured = False
+    assert hud.ocr_available() is True                     # available via PATH
+
+
+def test_ocr_unavailable_when_neither_resolves(monkeypatch):
+    pytest.importorskip("pytesseract")
+    monkeypatch.setattr(hud.gconf, "TESSERACT_CMD", "Z:/nope/tesseract.exe")
+    monkeypatch.setattr(hud.shutil, "which", lambda n: None)  # not on PATH either
+    hud._ocr_configured = False
+    assert hud.ocr_available() is False
+    msg = hud.ocr_unavailable_message()
+    assert "TESSERACT_CMD" in msg and "PATH" in msg          # actionable
 
 
 def test_multikill_streaks_collapse_escalating_banners_to_top_tier():

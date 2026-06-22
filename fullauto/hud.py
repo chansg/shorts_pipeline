@@ -15,6 +15,8 @@ fail-safe and the scoring are testable without ffmpeg or an OCR install.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -22,6 +24,52 @@ from pathlib import Path
 from typing import Callable
 
 from gameplay import config as gconf
+
+
+# ---- Tesseract OCR wiring (optional dependency; never required) -------------
+
+_ocr_configured = False
+
+
+def _configure_ocr() -> None:
+    """Point pytesseract at config.TESSERACT_CMD when that file exists (once). Leaves
+    pytesseract's default 'tesseract' lookup alone otherwise, so a PATH install works.
+    No-op (and never raises) if pytesseract isn't installed."""
+    global _ocr_configured
+    if _ocr_configured:
+        return
+    _ocr_configured = True
+    try:
+        import pytesseract
+    except ImportError:
+        return
+    cmd = getattr(gconf, "TESSERACT_CMD", None)
+    if cmd and os.path.isfile(cmd):
+        pytesseract.pytesseract.tesseract_cmd = cmd
+
+
+def ocr_available() -> bool:
+    """True if Tesseract OCR is reachable: pytesseract installed AND either the
+    configured TESSERACT_CMD file exists (configured here) or `tesseract` is on PATH.
+    Used to give a clear 'why nothing was found' message instead of silent failure."""
+    try:
+        import pytesseract  # noqa: F401
+    except ImportError:
+        return False
+    _configure_ocr()
+    cmd = getattr(gconf, "TESSERACT_CMD", None)
+    if cmd and os.path.isfile(cmd):
+        return True
+    return shutil.which("tesseract") is not None
+
+
+def ocr_unavailable_message() -> str:
+    """Actionable one-liner for when OCR-dependent detection finds nothing."""
+    cmd = (getattr(gconf, "TESSERACT_CMD", "") or "").strip()
+    return ("Tesseract OCR not found — HUD/ARAM banner reading is disabled. Install "
+            "Tesseract and set TESSERACT_CMD (currently: "
+            f"{cmd or '<unset>'}), or add `tesseract` to PATH. ARAM multikill detection "
+            "needs OCR. (Other modes are unaffected.)")
 
 
 @dataclass
@@ -124,9 +172,10 @@ def roi_crop(frame, roi):
 # ---- brittle, isolated: frame sampling + OCR --------------------------------
 
 def _default_recognizer(crop) -> str:
-    """Try OCR on a ROI crop. Uses pytesseract if installed; otherwise raises so the
-    caller's fail-safe kicks in (audio-only). Kept tiny + dependency-optional on
-    purpose — HUD is a bonus, never a requirement."""
+    """Try OCR on a ROI crop. Uses pytesseract if installed (pointed at the configured
+    Tesseract binary); otherwise raises so the caller's fail-safe kicks in (audio-only).
+    Kept tiny + dependency-optional on purpose — HUD is a bonus, never a requirement."""
+    _configure_ocr()                        # point at config.TESSERACT_CMD if present
     import pytesseract                      # optional; ImportError -> handled upstream
     return pytesseract.image_to_string(crop)
 

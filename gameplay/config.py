@@ -327,6 +327,15 @@ POST_ROLL_S = 10.0                 # payoff AFTER the spike
 MERGE_GAP_S = 3.0                  # merge windows within this gap into one candidate
 MAX_CANDIDATES = 20                # keep the highest-scoring N (recall-biased)
 
+# Path to the Tesseract OCR binary (HUD/ARAM multikill detection reads the banner with
+# it). PATH is used when this resolves to no file, so a machine with tesseract on PATH
+# still works. Env var TESSERACT_CMD overrides; default = the common Windows AppData
+# install. OCR is optional — when neither resolves, OCR features degrade with a message.
+TESSERACT_CMD = os.environ.get(
+    "TESSERACT_CMD",
+    r"C:\Users\chansg\AppData\Local\Programs\Tesseract-OCR\tesseract.exe",
+)
+
 # -- HUD event scan (League-specific, brittle; isolated + fail-safe booster) --
 HUD_SCAN_ENABLED = True            # master switch; off -> audio-only candidates
 HUD_SAMPLE_FPS = 1.0               # frames/sec sampled WITHIN a candidate window only

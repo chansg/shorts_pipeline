@@ -162,11 +162,15 @@ def detect_aram_candidates(video, total: float, *, hud_enabled: bool | None = No
     if not hud_enabled:
         emit("  ARAM mode needs the HUD scan enabled (it reads the multikill banner).")
         return []
+    if not hud_mod.ocr_available():
+        emit("  " + hud_mod.ocr_unavailable_message())
+        return []
     emit("Scanning the whole clip for multikill / ace banners (ARAM)...")
     events = hud_mod.scan_video(video, total, enabled=hud_enabled)
     if not events:
-        emit("  no banners detected — install OCR (pytesseract) and check the banner "
-             "ROI matches your resolution, or use Generic mode.")
+        emit("  no multikill/ace banners detected — none in this clip, or the banner "
+             "ROI doesn't match your resolution (adjust HUD_ROIS['banner'] / raise "
+             "ARAM_SCAN_FPS).")
         return []
     streaks = hud_mod.multikill_streaks(events)
     aces = hud_mod.ace_times(events) if gconf.ARAM_INCLUDE_ACE else []

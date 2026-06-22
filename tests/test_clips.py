@@ -109,6 +109,17 @@ def test_aram_run_needs_hud_then_exports(tmp_path, monkeypatch):
     assert session.candidates_path.read_text() == "[]"
 
 
+def test_aram_emits_actionable_message_when_ocr_unavailable(monkeypatch):
+    # OCR missing -> ARAM returns no candidates with the clear "install Tesseract" note,
+    # never crashes (fail-safe preserved).
+    monkeypatch.setattr(clips.hud_mod, "ocr_available", lambda: False)
+    msgs = []
+    out = clips.detect_aram_candidates("vod.mp4", 300.0, hud_enabled=True,
+                                       progress=msgs.append)
+    assert out == []
+    assert any("TESSERACT_CMD" in m and "PATH" in m for m in msgs)
+
+
 # ---- friendly empty (no crash) ----------------------------------------------
 
 def test_no_windows_returns_empty_with_message(tmp_path, monkeypatch):

@@ -434,7 +434,10 @@ loads it straight into the Gaming uploader.
 > `REACTION_ONSET_WEIGHT` or the threshold. Widen clips with `PRE_ROLL_S`/`POST_ROLL_S`.
 > HUD ROIs are 1080p defaults — adjust per capture resolution. **ARAM mode needs OCR**
 > (`pip install pytesseract` + the Tesseract binary) and `imageio` to read the banner;
-> without them `scan_video` finds nothing and ARAM mode returns empty (it never crashes).
+> without them `scan_video` finds nothing and ARAM mode returns empty **with a clear
+> message** (it never crashes). Point the pipeline at the binary with **`TESSERACT_CMD`**
+> (config, env-overridable; defaults to the common Windows AppData install) — set it, or
+> put `tesseract` on PATH. `fullauto.hud.ocr_available()` reports whether OCR is reachable.
 > If multikills are missed, raise `ARAM_SCAN_FPS` or widen `HUD_ROIS["banner"]`. The
 > GPU/long-run pass on real captures is yours; the unit tests cover the detection logic
 > on synthetic signals.
