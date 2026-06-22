@@ -19,7 +19,15 @@ never billed twice for the same work).
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
+
+# Gradio 6.x builds an error_map referencing Starlette's HTTP_422_UNPROCESSABLE_ENTITY on
+# EVERY queue request; the newer Starlette renamed it (…_CONTENT) and warns on each access,
+# so the console floods with a harmless StarletteDeprecationWarning per request. It is NOT
+# an error, a failed request, or a loop — the events still succeed. Silence just that one
+# message so the log is readable (and so it doesn't look like the app is broken).
+warnings.filterwarnings("ignore", message=".*HTTP_422_UNPROCESSABLE_ENTITY.*")
 
 import gradio as gr
 

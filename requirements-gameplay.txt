@@ -11,6 +11,16 @@
 #     pip install -r requirements-gameplay.txt
 # (cu121 = CUDA 12.1; pick the tag matching your driver — see pytorch.org.)
 
+# huggingface-hub: whisperx 3.8.6 + its transformers + pyannote.audio all require
+# huggingface-hub<1.0, but gradio 6.x DECLARES huggingface-hub>=1.2 (it runs fine on
+# <1.0 in practice). Without this pin, `pip install -r requirements.txt` bumps the hub
+# to satisfy gradio and transcription dies with:
+#   "ImportError: huggingface-hub>=0.34.0,<1.0 is required ... found 1.x".
+# Pin it low so transcription keeps working. pip WILL print a dependency-conflict
+# warning about gradio — that is expected and safe to ignore (gradio still works).
+# Already broke it? Recover with:  pip install "huggingface-hub<1.0"
+huggingface-hub>=0.34.0,<1.0
+
 # Transcribe + word-align + diarize (one pass). PINNED to the tested combo — the
 # whisperx 3.2+ API moved DiarizationPipeline to whisperx.diarize and changed the
 # ctor kwarg (use_auth_token -> token); the diarization code targets this pair.

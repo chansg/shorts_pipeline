@@ -198,6 +198,17 @@ missing. The pinned, tested stack is whisperx 3.8.6 / pyannote.audio 4.0.4 /
 torch 2.8.0. **The first real transcribe+diarize run is yours to execute** (needs
 your GPU, token, and accepted licence).
 
+> **Gotcha — `huggingface-hub` version clash.** Transcription failing with
+> *"ImportError: huggingface-hub>=0.34.0,<1.0 is required … found 1.x"* means the hub
+> got bumped (gradio 6.x declares `>=1.2`, but whisperx/transformers need `<1.0`).
+> `requirements-gameplay.txt` pins it low; recover an already-broken env with
+> `pip install "huggingface-hub<1.0"`. The pip dependency-conflict warning about gradio
+> is expected and harmless (gradio runs fine on the lower hub).
+>
+> **Not a bug — `HTTP_422_UNPROCESSABLE_ENTITY` log spam.** Gradio 6.x + a newer
+> Starlette print a `StarletteDeprecationWarning` on *every* request; it's noise, not a
+> failed request or a loop. `app.py` silences just that message.
+
 ### Noisy game audio (transcript quality)
 
 Loud game audio over voice chat used to break the transcript two ways: a **massive
