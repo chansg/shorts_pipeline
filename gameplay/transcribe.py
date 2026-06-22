@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -126,6 +127,47 @@ def prepare_audio(src: str | Path, dest: str | Path) -> Path:
     cmd += ["-c:a", "pcm_s16le", str(dest)]
     _run(cmd)
     return dest
+
+
+def _is_faststart(path: str | Path) -> bool:
+    """True if the MP4 `moov` atom sits BEFORE `mdat` (so a browser can start playback
+    without downloading the whole file). Reads only the first ~1 MB. Conservative: on
+    any read error it returns True (don't remux)."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(1 << 20)
+    except OSError:
+        return True
+    moov, mdat = head.find(b"moov"), head.find(b"mdat")
+    if moov == -1:
+        return False                       # moov not near the front -> not faststart
+    if mdat == -1:
+        return True                        # moov present, mdat further in -> faststart
+    return moov < mdat
+
+
+def playable_preview(path):
+    """Return a browser-playable version of an uploaded clip for the gr.Video preview.
+
+    Editors often export MP4s with the `moov` atom at the END (no faststart); the HTML5
+    player then can't start and Gradio shows 'Video not playable' — even though ffmpeg
+    (and so the whole pipeline) reads the file fine. This losslessly remuxes such files
+    (`-c copy -movflags +faststart`) into a temp dir, keeping the ORIGINAL filename so
+    the derived clip name is unchanged. FAIL-SAFE: returns the original path on anything
+    unexpected (a non-video, an already-faststart file, or an ffmpeg error)."""
+    if not path:
+        return path
+    try:
+        p = Path(path)
+        if p.suffix.lower() not in (".mp4", ".mov", ".m4v") or _is_faststart(p):
+            return str(p)
+        out = Path(tempfile.mkdtemp(prefix="gp_fast_")) / p.name
+        from modules.assemble import _run
+        _run(["ffmpeg", "-y", "-i", str(p), "-c", "copy", "-movflags", "+faststart",
+              str(out)])
+        return str(out)
+    except Exception:        # noqa: BLE001 — a remux hiccup must never block the upload
+        return str(path)
 
 
 def import_source(src: str | Path, name: str | None = None) -> GameplayClip:

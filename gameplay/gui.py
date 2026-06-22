@@ -486,6 +486,11 @@ def build_gameplay_tab() -> "gr.Video":
         result_video = gr.Video(label="Result (9:16 Short)")
 
         # -- wiring --
+        # Editors often export MP4s without faststart (moov atom at the end), which the
+        # browser can't play ("Video not playable") even though ffmpeg reads them fine.
+        # Remux such uploads to faststart so the preview plays (fail-safe: unchanged on
+        # any issue). Same path then feeds Transcribe.
+        clip_video.upload(transcribe_mod.playable_preview, clip_video, clip_video)
         transcribe_btn.click(_set_clip_name, clip_video, clip_state) \
             .then(_do_transcribe, [clip_video, diarize_cb, speakers_dd, clip_state],
                   transcribe_status) \
