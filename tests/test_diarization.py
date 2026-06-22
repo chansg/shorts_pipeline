@@ -79,6 +79,39 @@ def test_assign_speakers_no_turns_is_noop():
     assert all("speaker" not in w for seg in out["segments"] for w in seg["words"])
 
 
+def test_assign_speaker_sums_overlap_across_fragmented_turns():
+    # Cross-talk: pyannote emits many tiny alternating turns. A word spanning the whole
+    # span must go to the speaker who DOMINATES it (summed), not to a sliver turn.
+    from gameplay.transcribe import _best_speaker
+    turns = [(12.6, 14.4, "S1"), (13.99, 14.10, "S0"),   # S1 dominates 12.6-15
+             (14.64, 14.70, "S1"), (14.70, 14.73, "S0"),
+             (14.75, 14.90, "S0"), (14.90, 15.9, "S1")]
+    assert _best_speaker(turns, 12.67, 14.94, True) == "S1"   # summed S1 >> S0
+    # but a word sitting mostly inside the S0 sliver region goes to S0
+    assert _best_speaker(turns, 14.70, 14.90, True) == "S0"
+
+
+def test_diarize_pins_num_speakers_when_set(monkeypatch):
+    # _diarize must pass num_speakers=N (pinned) OR min/max (auto), per the argument.
+    from gameplay import transcribe as tx
+    calls = []
+
+    class FakePipe:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, audio, **kw):
+            calls.append(kw)
+            return [(0.0, 1.0, "S0")]
+
+    monkeypatch.setattr(tx, "_resolve_diarization_pipeline", lambda: FakePipe)
+    tx._diarize("audio", "tok", "cpu", num_speakers=2)
+    assert calls[-1] == {"num_speakers": 2}
+    tx._diarize("audio", "tok", "cpu", num_speakers=None)
+    assert "min_speakers" in calls[-1] and "max_speakers" in calls[-1]
+    assert "num_speakers" not in calls[-1]
+
+
 def test_word_without_timestamp_is_skipped():
     result = {"segments": [{"start": 0.0, "end": 1.0, "words": [
         {"word": "punct"}]}]}    # no start/end

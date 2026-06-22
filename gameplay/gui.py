@@ -125,11 +125,12 @@ def _set_clip_name(video):
     return slugify(Path(video).stem)
 
 
-def _do_transcribe(video, diarize, clip_name):
+def _do_transcribe(video, diarize, speakers, clip_name):
     """Stream transcribe progress (status only). Caches transcript.json so the
     chained editor-load step can read it back."""
     if not video:
         raise gr.Error("Upload a gameplay clip first.")
+    num_speakers = None if str(speakers) in ("", "Auto") else int(speakers)
     log: list[str] = []
 
     def emit(msg):
@@ -144,7 +145,7 @@ def _do_transcribe(video, diarize, clip_name):
         captured: list[str] = []
         transcribe_mod.transcribe_clip(
             clip, progress=lambda m: captured.append(m), force=True,
-            diarize=bool(diarize))
+            diarize=bool(diarize), num_speakers=num_speakers)
         log.extend(captured)
         yield "\n".join(log)
     except FriendlyError as fe:
@@ -339,6 +340,10 @@ def build_gameplay_tab() -> "gr.Video":
                 diarize_cb = gr.Checkbox(
                     value=True,
                     label="Diarize speakers (needs HF_TOKEN; else single-speaker)")
+                speakers_dd = gr.Dropdown(
+                    choices=["Auto", "1", "2", "3", "4", "5"], value="Auto",
+                    label="Speakers (pin the count if Auto mislabels — it can't split "
+                          "two voices talking at once)")
                 transcribe_btn = gr.Button("① Transcribe / Re-transcribe",
                                            variant="primary")
                 gr.Markdown("Runs WhisperX (the only ASR step) — **overwrites any "
@@ -482,7 +487,7 @@ def build_gameplay_tab() -> "gr.Video":
 
         # -- wiring --
         transcribe_btn.click(_set_clip_name, clip_video, clip_state) \
-            .then(_do_transcribe, [clip_video, diarize_cb, clip_state],
+            .then(_do_transcribe, [clip_video, diarize_cb, speakers_dd, clip_state],
                   transcribe_status) \
             .then(_load_editor, clip_state,
                   [transcript_df, speaker_df, editor_md, speaker_swatch_md])

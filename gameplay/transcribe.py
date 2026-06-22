@@ -182,15 +182,22 @@ def diarization_turns(diar) -> list[tuple[float, float, str]]:
 
 
 def _best_speaker(turns, start: float, end: float, fill_nearest: bool):
-    best, best_ov = None, 0.0
+    """The speaker with the MOST TOTAL overlap across [start, end], summed over ALL of
+    their turns. During cross-talk pyannote emits many tiny alternating turns; summing
+    per speaker keeps a word with the speaker who actually dominates its span instead of
+    letting one sliver turn win. Falls back to the nearest turn's speaker when nothing
+    overlaps (and fill_nearest)."""
+    totals: dict[str, float] = {}
     for ts, te, spk in turns:
         ov = min(end, te) - max(start, ts)
-        if ov > best_ov:
-            best_ov, best = ov, spk
-    if best is None and fill_nearest and turns:
+        if ov > 0:
+            totals[spk] = totals.get(spk, 0.0) + ov
+    if totals:
+        return max(totals, key=lambda s: totals[s])
+    if fill_nearest and turns:
         mid = (start + end) / 2.0
-        best = min(turns, key=lambda t: abs((t[0] + t[1]) / 2.0 - mid))[2]
-    return best
+        return min(turns, key=lambda t: abs((t[0] + t[1]) / 2.0 - mid))[2]
+    return None
 
 
 def assign_speakers(result: dict, turns: list[tuple[float, float, str]],
@@ -240,16 +247,20 @@ def _diar_failure_message(e: Exception) -> str:
             f"Details: {type(e).__name__}: {e}")
 
 
-def _diarize(audio, token: str, dev: str):
-    """Run pyannote diarization and return (start,end,speaker) turns. Raises on
-    failure (the caller classifies + degrades to single-speaker)."""
+def _diarize(audio, token: str, dev: str, num_speakers: int | None = None):
+    """Run pyannote diarization and return (start,end,speaker) turns. `num_speakers`
+    pins the exact count (None = auto within [MIN, MAX]). Raises on failure (the caller
+    classifies + degrades to single-speaker)."""
     DiarizationPipeline = _resolve_diarization_pipeline()
     try:                                  # whisperx 3.8 uses token=
         diarizer = DiarizationPipeline(token=token, device=dev)
     except TypeError:                     # older whisperx used use_auth_token=
         diarizer = DiarizationPipeline(use_auth_token=token, device=dev)
-    diar = diarizer(audio, min_speakers=gconf.DIARIZE_MIN_SPEAKERS,
-                    max_speakers=gconf.DIARIZE_MAX_SPEAKERS)
+    if num_speakers:
+        diar = diarizer(audio, num_speakers=int(num_speakers))
+    else:
+        diar = diarizer(audio, min_speakers=gconf.DIARIZE_MIN_SPEAKERS,
+                        max_speakers=gconf.DIARIZE_MAX_SPEAKERS)
     return diarization_turns(diar)
 
 
@@ -311,7 +322,8 @@ def _load_model(whisperx, plan, asr_options: dict, vad_options: dict):
 
 
 def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
-               diarize: bool = True, batch_size: int | None = None) -> Transcript:
+               diarize: bool = True, batch_size: int | None = None,
+               num_speakers: int | None = None) -> Transcript:
     """Transcribe + word-align + optionally diarize `audio_or_video`.
 
     Long-video safe on a 10GB card: the ASR model's VRAM is released before the
@@ -401,11 +413,13 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
     device_mod.free_vram()
 
     token = gconf.hf_token()
+    num_speakers = gconf.DIARIZE_NUM_SPEAKERS if num_speakers is None else num_speakers
     diarized_ran = False
     if diarize and token:
-        _emit(progress, "Diarizing speakers (pyannote)...")
+        _emit(progress, "Diarizing speakers (pyannote, "
+                        f"{f'pinned {int(num_speakers)}' if num_speakers else 'auto count'})...")
         try:
-            turns = _diarize(audio, token, plan.device)
+            turns = _diarize(audio, token, plan.device, num_speakers=num_speakers)
             result = assign_speakers(result, turns)
             diarized_ran = True
             n = len({t[2] for t in turns})
@@ -433,7 +447,8 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
 
 
 def transcribe_clip(clip: GameplayClip, progress: Progress | None = None,
-                    force: bool = False, diarize: bool = True) -> Transcript:
+                    force: bool = False, diarize: bool = True,
+                    num_speakers: int | None = None) -> Transcript:
     """Transcribe a clip's source and cache the result to transcript.json
     (resumable — won't re-run unless forced)."""
     if clip.has_transcript() and not force:
@@ -442,7 +457,8 @@ def transcribe_clip(clip: GameplayClip, progress: Progress | None = None,
     src = clip.source_path()
     if src is None:
         raise FriendlyError("No source clip to transcribe.")
-    transcript = transcribe(src, progress=progress, diarize=diarize)
+    transcript = transcribe(src, progress=progress, diarize=diarize,
+                            num_speakers=num_speakers)
     transcript.save(clip.transcript_path)
     return transcript
 

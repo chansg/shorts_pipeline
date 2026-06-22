@@ -132,7 +132,21 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
 2. **① Transcribe** — WhisperX transcribes, word-aligns, and (with a token)
    diarizes the speakers in one pass. The device is auto-detected: **CUDA →
    large-v2; CPU → a smaller model** with a loud warning (see Setup). No token /
-   one voice → single-speaker.
+   one voice → single-speaker. A **Speakers** dropdown pins the exact count
+   (`Auto`/1–5 → `DIARIZE_NUM_SPEAKERS`): pyannote's auto-clustering is unreliable on
+   short, cross-talky clips, so telling it the number is the strongest lever when it
+   mislabels. Word→speaker assignment is by **summed overlap per speaker** (robust to
+   the tiny alternating turns pyannote emits during overlap).
+
+   > **Cross-talk is a hard limit, not a bug.** When two people talk *at the same time*,
+   > Whisper transcribes the mixed audio as **one** stream of words, so those words can
+   > only be given to **one** speaker — and on short clips pyannote may even cluster a
+   > whole utterance to the wrong person. Pinning the speaker count and the summed-overlap
+   > assignment reduce errors, but they **cannot separate simultaneous voices**. Truly
+   > automating overlap needs a **source-separation** stage (split the mix into one
+   > waveform per speaker, transcribe each, then merge) — a heavier model not yet wired
+   > in. Until then, fix the residual mislabels in the transcript grid (rename a speaker,
+   > or **Bulk edits → Assign speaker to rows** for a whole stretch).
 3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
    (`SPEAKER_00` → "Chan") and pick their colours (shown as inline swatches).
    *These rows are the captions.* The grid gives the words a **wide, wrapped** column

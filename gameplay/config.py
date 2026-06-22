@@ -42,6 +42,13 @@ WHISPERX_COMPUTE_CPU = "int8"      # cpu fallback compute type
 WHISPERX_LANGUAGE = "en"
 DIARIZE_MIN_SPEAKERS = 1
 DIARIZE_MAX_SPEAKERS = 6           # 4-5 people expected; a little headroom
+# Pin the EXACT speaker count (None = auto-detect within [MIN, MAX]). Auto-clustering is
+# unreliable on short, cross-talky clips (it mislabels/merges similar voices); when you
+# know how many people are talking, telling pyannote the number is the strongest lever.
+# Exposed per-transcribe in the GUI ("Speakers" dropdown). NOTE: this cannot separate
+# two people talking AT ONCE — single-stream ASR transcribes overlap as one voice; true
+# cross-talk separation needs a source-separation stage (see README).
+DIARIZE_NUM_SPEAKERS = None
 # ASR anti-hallucination (noisy gameplay audio).
 #
 # IMPORTANT: WhisperX runs *batched* inference (asr.py:generate_segment_batched).
