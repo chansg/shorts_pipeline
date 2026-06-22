@@ -147,18 +147,25 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    > waveform per speaker, transcribe each, then merge) — a heavier model not yet wired
    > in. Until then, fix the residual mislabels in the transcript grid (rename a speaker,
    > or **Bulk edits → Assign speaker to rows** for a whole stretch).
-3. **Transcript gate** — fix ASR errors in the editable grid, rename speakers
-   (`SPEAKER_00` → "Chan") and pick their colours (shown as inline swatches).
-   *These rows are the captions.* The grid gives the words a **wide, wrapped** column
-   with the numeric/flag columns kept tight, and a bounded scroll height so a long
-   transcript doesn't push the build controls off-screen. Each row has a **censor**
-   checkbox (auto-ticked from the word-list — see Profanity censor); right-click
-   inserts/deletes rows (new rows with blank timing are timed automatically), and **↺
-   Revert grid** reloads the saved transcript to discard accidental edits. The **Bulk
-   edits & caption preview** panel
-   adds: multi-row speaker reassignment (fix a stretch the diariser mislabelled),
-   find/replace (a misheard name, fixed once), merge/split rows, and a **Re-apply
-   captions** preview that re-renders just the caption track — no re-transcription.
+3. **Transcript gate (fast keyboard editor)** — correcting the ASR is the per-clip
+   bottleneck, so the editor (`gameplay/editor.py`) is built for speed, *not* a
+   spreadsheet. *These rows are the captions.*
+   - **↑/↓** or **Enter** walk the rows; type to fix a word in the whole-row field — no
+     double-click-per-cell.
+   - **Alt+1…N** set the active row's speaker (or a **shift-selected range** — click a
+     colour chip, shift-click another) in ONE action; **Alt+B** sets the speaker for
+     **all rows below** (the diariser often flips mid-clip); **Alt+D** deletes a row.
+   - The speaker **colour chip** is inline so the A/B mapping is obvious as you assign;
+     rename/recolour speakers in the colour grid below.
+   - Profanity **auto-censors at build**; click **🔇** on a row to force it.
+   - The **Bulk edits & caption preview** panel still has the button forms of the same
+     ops (reusing `gameplay/editing.py`): multi-row speaker assign, find/replace,
+     merge/split, **↺ Revert** (reload the saved transcript), and a **Re-apply
+     captions** preview — no re-transcription.
+
+   It's a self-contained HTML/JS component (no CDN); edits commit to the Python side on
+   blur / Enter / each op (never per keystroke), so the data contract is the same
+   `(text, speaker, start, end, censor)` rows the rest of the pipeline already used.
 4. Choose **effects** (punch-zoom / shake, driven off the audio-energy envelope),
    a **caption** font/position (default `0.78` sits in the lower blur band, off the
    HUD), and a **like/subscribe overlay** (asset, position, start, duration).

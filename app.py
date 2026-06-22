@@ -823,6 +823,9 @@ def _route(target: str) -> tuple:
 
 
 _LANDING_CSS = """
+/* fast transcript editor: hide the commit-bridge button + its js-input slot (they must
+   be in the DOM — visible=False would not render them — but never shown to the user). */
+.txe-hidden { display: none !important; }
 .landing-wrap { max-width: 920px; margin: 0 auto; padding: 24px 8px; }
 .landing-wrap .brand-title { text-align: center; }
 .entry-card { border: 1px solid var(--border-color-primary);
@@ -1345,6 +1348,13 @@ def build_app() -> gr.Blocks:
                 [fullauto_handles["video"], fullauto_handles["dd"]],
                 gaming_clip_video) \
                 .then(lambda: _route("gaming"), None, nav)
+
+        # Install the fast transcript editor's keyboard controller once on page load. It
+        # finds the editor's #tx-root, makes it interactive, and a MutationObserver
+        # rebuilds it whenever the server re-renders its data (transcribe / bulk-op /
+        # reload). Commits flow back through the hidden #tx-bridge textbox.
+        from gameplay.editor import SETUP_JS
+        demo.load(js=SETUP_JS)
     return demo
 
 

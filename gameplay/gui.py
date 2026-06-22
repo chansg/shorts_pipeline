@@ -22,6 +22,7 @@ import gradio as gr
 from orchestrator.errors import FriendlyError, friendly
 from gameplay import config as gconf
 from gameplay import editing as edit_mod
+from gameplay import editor as editor_mod
 from gameplay import manual as manual_mod
 from gameplay import overlay as ov_mod
 from gameplay import transcribe as transcribe_mod
@@ -79,25 +80,48 @@ def _parse_speaker_rows(rows) -> dict:
 
 # ---- transcript editor handlers (thin wrappers over gameplay.editing) ------
 
-def _edit_assign(rows, span, speaker):
-    return edit_mod.assign_speaker(rows, span, speaker), f"Assigned '{speaker}' to rows {span or '(none)'}."
+# Bulk-edit handlers operate on the authoritative rows_state and RE-RENDER the editor
+# HTML (the JS observer rebuilds from the new data). They reuse the pure editing.py
+# helpers verbatim. Each returns (rows, editor_html, status); spk_rows colours the view.
+def _edit_assign(rows, span, speaker, spk_rows):
+    rows2 = edit_mod.assign_speaker(rows, span, speaker)
+    return (rows2, editor_mod.render_editor(rows2, spk_rows),
+            f"Assigned '{speaker}' to rows {span or '(none)'}.")
 
 
-def _edit_find_replace(rows, find, repl, whole_word):
+def _edit_find_replace(rows, find, repl, whole_word, spk_rows):
     rows2, n = edit_mod.find_replace(rows, find, repl, whole_word=bool(whole_word))
-    return rows2, f"Replaced {n} occurrence(s) of '{find}'."
+    return (rows2, editor_mod.render_editor(rows2, spk_rows),
+            f"Replaced {n} occurrence(s) of '{find}'.")
 
 
-def _edit_merge(rows, span):
-    return edit_mod.merge_rows(rows, span), f"Merged rows {span or '(none)'}."
+def _edit_merge(rows, span, spk_rows):
+    rows2 = edit_mod.merge_rows(rows, span)
+    return (rows2, editor_mod.render_editor(rows2, spk_rows),
+            f"Merged rows {span or '(none)'}.")
 
 
-def _edit_split(rows, row_num):
+def _edit_split(rows, row_num, spk_rows):
     try:
         i = int(row_num)
     except (TypeError, ValueError):
-        return rows, "Enter a row number to split."
-    return edit_mod.split_row(rows, i), f"Split row {i}."
+        return rows, gr.skip(), "Enter a row number to split."
+    rows2 = edit_mod.split_row(rows, i)
+    return rows2, editor_mod.render_editor(rows2, spk_rows), f"Split row {i}."
+
+
+def _rows_from_dom(payload):
+    """Commit handler: the js reader returned the live editor rows JSON -> rows_state.
+    On a parse miss keep the prior state (gr.skip) instead of wiping edits; never
+    re-renders the editor, so there's no echo loop."""
+    rows = editor_mod.parse_bridge(payload)
+    return rows if rows is not None else gr.skip()
+
+
+def _editor_after_speaker(rows, spk_rows):
+    """Re-render the editor so speaker recolours/renames show inline as the colour grid
+    is edited."""
+    return editor_mod.render_editor(rows, spk_rows)
 
 
 def _do_preview_captions(clip_name, rows, spk_rows, font, posy):
@@ -154,40 +178,6 @@ def _do_transcribe(video, diarize, speakers, clip_name):
         raise gr.Error(str(friendly(e)), duration=None)
 
 
-def _coerce_censor_grid(rows):
-    """Normalise the censor column to a real bool on every grid change.
-
-    Gradio renders a right-click-added row's bool cell as an empty TEXT box (it holds
-    "" until it carries an actual bool), so the user can't tick it. Coercing the cell
-    to a real bool makes the checkbox appear and become tickable. Profane text is also
-    auto-ticked so the user can see it will be censored. Row order and timing are left
-    untouched (sorting/inference happen at build via Transcript.from_rows); the helper
-    is idempotent so the .change loop settles in one pass."""
-    from gameplay import censor as _censor
-    from gameplay.transcript import _truthy
-    out = []
-    for row in Transcript._normalise_grid(rows):
-        row = (row + ["", "", "", "", False])[:5]
-        text = str(row[0] or "").strip()
-        row[4] = _truthy(row[4]) or (bool(text) and _censor.is_censored(text))
-        out.append(row)
-    return out
-
-
-def _coerce_censor_change(rows):
-    """transcript_df.change handler: coerce the censor column, but return gr.skip()
-    when the grid is ALREADY fully coerced (every censor cell a real bool, no auto-flag
-    to add). Echoing an unchanged grid back to the same component is what risks a
-    re-render/request loop, so we only write when something actually changes — the
-    coercion then converges in one step."""
-    coerced = _coerce_censor_grid(rows)
-    raw = [list(r) for r in Transcript._normalise_grid(rows)]
-    already = (len(raw) == len(coerced) and all(
-        len(r) == 5 and isinstance(r[4], bool) and r == c
-        for r, c in zip(raw, coerced)))
-    return gr.skip() if already else coerced
-
-
 def _swatches_md(spk_rows) -> str:
     """Inline speaker→colour chips so the mapping is visible while editing."""
     chips = []
@@ -205,7 +195,7 @@ def _swatches_md(spk_rows) -> str:
 
 
 def _editor_payload(t: Transcript):
-    """(rows, speaker_rows, note, swatch_md) for the transcript editor."""
+    """(rows, editor_html, speaker_rows, note, swatch_md) for the transcript editor."""
     if not t.single_speaker:
         note = (f"**{len(t.words)} words**, {len(t.speakers)} speakers. "
                 f"Rename speakers in the *speaker* column; recolour below. "
@@ -223,16 +213,20 @@ def _editor_payload(t: Transcript):
     if n_cen:
         note += f" 🔇 {n_cen} word(s) flagged for censor."
     spk_rows = _speaker_rows(t)
-    return t.to_rows(), spk_rows, note, _swatches_md(spk_rows)
+    rows = t.to_rows()
+    return (rows, editor_mod.render_editor(rows, spk_rows), spk_rows, note,
+            _swatches_md(spk_rows))
 
 
 def _load_editor(clip_name):
-    empty = ([], [], "Transcribe a clip to populate the transcript editor.", "")
+    empty = ([], editor_mod.render_editor([]), [],
+             "Transcribe a clip to populate the transcript editor.", "")
     if not clip_name:
         return empty
     clip = GameplayClip(clip_name)
     if not clip.has_transcript():
-        return ([], [], "No transcript yet — run Transcribe.", "")
+        return ([], editor_mod.render_editor([]), [], "No transcript yet — run "
+                "Transcribe.", "")
     return _editor_payload(Transcript.load(clip.transcript_path))
 
 
@@ -351,28 +345,29 @@ def build_gameplay_tab() -> "gr.Video":
                 transcribe_status = gr.Textbox(label="Transcribe log", lines=4,
                                                interactive=False)
 
-        # -- 2. transcript gate --
+        # -- 2. transcript gate (fast keyboard editor — see gameplay/editor.py) --
         editor_md = gr.Markdown("Transcribe a clip to populate the transcript editor.")
-        transcript_df = gr.Dataframe(
-            headers=Transcript.HEADERS,          # text, speaker, start, end, censor
-            datatype=["str", "str", "number", "number", "bool"],
-            type="array", interactive=True, label="Transcript (editable)",
-            row_count=(1, "dynamic"),
-            # Give the words room and keep the numeric/flag columns tight; wrap long
-            # phrases and cap the height so a long transcript scrolls instead of pushing
-            # the build controls off-screen. (show_search / show_row_numbers are NOT used:
-            # they pollute the change-event payload and, with the censor coercion handler
-            # below echoing the grid back, caused a 422 request storm — see git history.)
-            column_widths=["40%", "20%", "12%", "12%", "16%"],
-            wrap=True, max_height=460)
+        # rows_state is the authoritative [text,speaker,start,end,censor] list the build
+        # reads; editor_html is the interactive view; tx_bridge is the hidden commit
+        # channel (the editor's JS writes rows JSON here on commit -> .input -> rows_state).
+        rows_state = gr.State([])
+        editor_html = gr.HTML(editor_mod.render_editor([]))
+        # Commit channel: the editor's JS clicks this hidden button on each commit; its
+        # js= reader pulls the live rows straight from the DOM into Python (Gradio 6
+        # ignores a programmatic textbox value-set, but a real button click + js reader
+        # is reliable). tx_in is the real-component input slot the js return replaces.
+        # Both are hidden via the .txe-hidden CSS rule (app-level).
+        tx_commit = gr.Button("commit", elem_id=editor_mod.COMMIT_ELEM_ID,
+                              elem_classes=["txe-hidden"])
+        tx_in = gr.Textbox("", elem_id="tx-in", elem_classes=["txe-hidden"])
         with gr.Row():
-            reload_grid_btn = gr.Button("↺ Revert grid to last transcribe", scale=0,
+            reload_grid_btn = gr.Button("↺ Revert to last transcribe", scale=0,
                                         size="sm")
             gr.Markdown(
-                "Click a cell to edit. **censor** flags a word for the bleep + caption "
-                "mask — tick to censor, untick a false positive (profanity auto-flags). "
-                "Right-click a row to insert/delete; new rows with blank `start`/`end` "
-                "are timed automatically.")
+                "Keyboard-first: **↑/↓** or **Enter** walk rows, type to fix a word, "
+                "**Alt+1…N** set the speaker (a shift-selected range too), **Alt+B** "
+                "speaker to all below, **Alt+D** delete. Profanity auto-censors at build; "
+                "click 🔇 to force it. The buttons below reuse the same edits.")
         speaker_swatch_md = gr.Markdown()        # inline speaker→colour chips
         speaker_df = gr.Dataframe(
             headers=["speaker", "color (hex)"], datatype=["str", "str"],
@@ -491,49 +486,56 @@ def build_gameplay_tab() -> "gr.Video":
         # Remux such uploads to faststart so the preview plays (fail-safe: unchanged on
         # any issue). Same path then feeds Transcribe.
         clip_video.upload(transcribe_mod.playable_preview, clip_video, clip_video)
+        _editor_out = [rows_state, editor_html, speaker_df, editor_md, speaker_swatch_md]
         transcribe_btn.click(_set_clip_name, clip_video, clip_state) \
             .then(_do_transcribe, [clip_video, diarize_cb, speakers_dd, clip_state],
                   transcribe_status) \
-            .then(_load_editor, clip_state,
-                  [transcript_df, speaker_df, editor_md, speaker_swatch_md])
-        # keep the inline colour swatches in sync as the user edits the colour grid
+            .then(_load_editor, clip_state, _editor_out)
+        # the editor's JS clicks tx_commit on each commit (blur / Enter / a speaker or
+        # row op); the js reader returns the live rows -> rows_state. No editor re-render
+        # here, so there is no echo loop; gr.skip() keeps prior state on a parse miss.
+        tx_commit.click(_rows_from_dom, tx_in, rows_state, js=editor_mod.READ_ROWS_JS)
+        # colour-grid edits: refresh the inline swatches AND recolour the editor inline
         speaker_df.change(_swatches_md, speaker_df, speaker_swatch_md)
-        # a right-click-added row's censor cell renders as a text box until it holds a
-        # real bool; coerce it on change so the checkbox appears — but skip the write
-        # once the grid is already coerced, so the event can't loop (no 422 storm)
-        transcript_df.change(_coerce_censor_change, transcript_df, transcript_df)
-        # discard accidental grid edits and reload from the saved transcript.json
-        reload_grid_btn.click(_load_editor, clip_state,
-                              [transcript_df, speaker_df, editor_md, speaker_swatch_md])
+        speaker_df.change(_editor_after_speaker, [rows_state, speaker_df], editor_html)
+        # discard accidental edits and reload from the saved transcript.json
+        reload_grid_btn.click(_load_editor, clip_state, _editor_out)
 
-        # transcript bulk-edit wiring (each returns updated grid rows + a status)
+        # bulk-edit wiring — each reuses an editing.py helper on rows_state and
+        # re-renders the editor (the JS observer rebuilds from the new data).
         edit_assign_btn.click(_edit_assign,
-                              [transcript_df, edit_span_tb, edit_speaker_tb],
-                              [transcript_df, edit_status])
+                              [rows_state, edit_span_tb, edit_speaker_tb, speaker_df],
+                              [rows_state, editor_html, edit_status])
         edit_replace_btn.click(_edit_find_replace,
-                               [transcript_df, edit_find_tb, edit_repl_tb,
-                                edit_whole_cb],
-                               [transcript_df, edit_status])
-        edit_merge_btn.click(_edit_merge, [transcript_df, edit_span_tb],
-                             [transcript_df, edit_status])
-        edit_split_btn.click(_edit_split, [transcript_df, edit_split_row_n],
-                             [transcript_df, edit_status])
-        preview_caps_btn.click(
-            _do_preview_captions,
-            [clip_state, transcript_df, speaker_df, font_dd, posy_sl],
-            preview_video)
+                               [rows_state, edit_find_tb, edit_repl_tb, edit_whole_cb,
+                                speaker_df],
+                               [rows_state, editor_html, edit_status])
+        edit_merge_btn.click(_edit_merge, [rows_state, edit_span_tb, speaker_df],
+                             [rows_state, editor_html, edit_status])
+        edit_split_btn.click(_edit_split, [rows_state, edit_split_row_n, speaker_df],
+                             [rows_state, editor_html, edit_status])
+        preview_caps_btn.click(_rows_from_dom, tx_in, rows_state,
+                               js=editor_mod.READ_ROWS_JS) \
+            .then(_do_preview_captions,
+                  [clip_state, rows_state, speaker_df, font_dd, posy_sl],
+                  preview_video)
 
         refresh_ov_btn.click(_refresh_overlays, None, overlay_dd)
 
         hook_preview_btn.click(_preview_hook, [hook_text_tb, hook_voice_tb], hook_audio)
 
-        build_inputs = [clip_state, transcript_df, speaker_df, effects_cbg,
+        build_inputs = [clip_state, rows_state, speaker_df, effects_cbg,
                         overlay_dd, overlay_pos_dd, overlay_start_n, overlay_dur_n,
                         font_dd, posy_sl, reframe_mode_dd, cropx_sl, cropy_sl,
                         fillfrac_sl, censor_dd, censor_mode_dd,
                         hook_enable_cb, hook_text_tb, hook_voice_tb,
                         caption_mode_dd, caption_offset_sl]
-        build_btn.click(_do_build, build_inputs, build_status) \
+        # flush the editor's latest in-DOM edits into rows_state BEFORE building (the
+        # click blurs the focused row, but the blur-commit round-trip may not have
+        # landed yet — this js read guarantees rows_state is current).
+        build_btn.click(_rows_from_dom, tx_in, rows_state,
+                        js=editor_mod.READ_ROWS_JS) \
+            .then(_do_build, build_inputs, build_status) \
             .then(_show_result, clip_state, result_video)
 
         # exposed so the full-auto tab can hand a detected candidate straight into this
