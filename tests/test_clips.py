@@ -62,10 +62,51 @@ def test_manifest_has_the_fields_the_gui_needs_and_round_trips(tmp_path, monkeyp
                 "hud_boost", "hud_events", "clip_name", "clip_path", "preview_path",
                 "why"):
         assert key in data[0], key
-    assert data[0]["why"].startswith("reaction 0.82")
+    assert data[0]["why"].startswith("doublekill") and "reaction 0.82" in data[0]["why"]
     back = clips.load_manifest(session)
     assert back[0].clip_name == "vod1_12s" and back[0].hud_events == ["doublekill"]
     assert back[0].score == 1.148
+
+
+# ---- ARAM: multikill-led candidates -----------------------------------------
+
+def test_aram_clips_rank_by_tier_then_reaction(monkeypatch):
+    # penta > quadra > ace > triple, regardless of when they happened; window anchored
+    # BEFORE the streak with ARAM pre/post roll.
+    monkeypatch.setattr(clips.gconf, "ARAM_PRE_ROLL_S", 10.0)
+    monkeypatch.setattr(clips.gconf, "ARAM_POST_ROLL_S", 6.0)
+    anchors = [("triplekill", 20.0, 26.0), ("pentakill", 100.0, 112.0),
+               ("ace", 200.0, 200.0), ("quadrakill", 300.0, 308.0)]
+    out = clips.aram_clips_from_anchors(anchors, total=400.0)
+    assert [c.hud_events[0] for c in out] == ["pentakill", "quadrakill", "ace", "triplekill"]
+    assert [c.rank for c in out] == [1, 2, 3, 4]
+    penta = out[0]
+    assert penta.start == 90.0 and penta.end == 118.0    # 10s before, 6s after streak
+    assert penta.score == clips.gconf.HUD_EVENT_WEIGHTS["pentakill"]
+
+
+def test_aram_reaction_breaks_ties_within_a_tier():
+    import numpy as np
+    # two triples; the one with the louder in-window reaction ranks first
+    times = np.arange(0, 400, 0.1)
+    score = np.zeros_like(times)
+    score[(times >= 100) & (times <= 110)] = 0.9      # loud reaction around the 2nd triple
+    anchors = [("triplekill", 20.0, 22.0), ("triplekill", 105.0, 107.0)]
+    out = clips.aram_clips_from_anchors(anchors, 400.0, score=score, times=times)
+    assert out[0].peaks[0] == 106.0 and out[0].audio_score > out[1].audio_score
+
+
+def test_aram_run_needs_hud_then_exports(tmp_path, monkeypatch):
+    monkeypatch.setattr(clips.gconf, "GAMEPLAY_DIR", tmp_path)
+    monkeypatch.setattr(clips, "detect_aram_candidates",
+                        lambda *a, **k: [])              # no multikills found
+    video = tmp_path / "vod.mp4"
+    video.write_bytes(b"x")
+    msgs = []
+    out, session = clips.run_highlight_detection(video, mode="aram",
+                                                 progress=msgs.append)
+    assert out == [] and any("ARAM" in m for m in msgs)
+    assert session.candidates_path.read_text() == "[]"
 
 
 # ---- friendly empty (no crash) ----------------------------------------------

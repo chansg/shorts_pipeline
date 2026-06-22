@@ -391,18 +391,42 @@ robust and fast. (`fullauto/reaction.py`, `fullauto/hud.py`, `fullauto/clips.py`
    open. A `candidates.json` records rank, score, audio-score, HUD events, window, and
    paths so the GUI lists each candidate **with why it was picked**.
 
-In the GUI: upload the VOD, tune the knobs (threshold, pre/post-roll, max, HUD on/off),
-**① Detect highlight clips** (the log prints the **score curve** for calibration), then
-pick a candidate and **② Refine in manual mode →** loads it straight into the Gaming
-uploader.
+### ARAM mode (League of Legends) — multikill-led
+
+A **Game mode** dropdown switches detection from generic to **ARAM (`GAME_MODE="aram"`)**,
+where the **multikill is the candidate** rather than a booster:
+
+- The **whole clip** is sampled (`ARAM_SCAN_FPS`) for the centre multikill / ace banner
+  (`fullauto.hud.scan_video`) — not just inside audio windows, because the money shot
+  doesn't always come with the loudest yell.
+- A fight's **escalating banners collapse to one streak** at its top tier
+  (`multikill_streaks`): Double → Triple → Quadra → **Penta** within `ARAM_STREAK_GAP_S`
+  becomes a **single Pentakill candidate**, not four. Streaks at/above
+  `ARAM_MIN_MULTIKILL` (default **triple**) qualify; **Aces** anchor too
+  (`ARAM_INCLUDE_ACE`).
+- Each anchors a generous window (`ARAM_PRE_ROLL_S` before the fight, `ARAM_POST_ROLL_S`
+  after the last banner), **ranked strictly by tier** (penta > quadra > ace > triple)
+  with the in-window voice reaction as the **tiebreak**.
+- ARAM mode surfaces **multikill/ace moments only** — the clips you actually want from
+  ARAM. It needs the HUD scan (OCR); with none detected it returns empty with guidance
+  (rather than falling back to generic reactions).
+
+In the GUI: upload the VOD, pick the **Game mode**, tune the knobs (threshold,
+pre/post-roll, max, HUD on/off), **① Detect highlight clips** (the log prints the
+**score curve** / detected tiers), then pick a candidate and **② Refine in manual mode →**
+loads it straight into the Gaming uploader.
 
 > **Calibration WILL be needed on real footage.** The detector is tuned on synthetic
 > audio; the live thresholds are yours to dial. If candidates are **sparse**, lower
 > `REACTION_THRESHOLD` (watch the logged score curve — aim for the threshold to sit
 > below the reaction peaks but above chatter). If **teamfights leak in**, raise
 > `REACTION_ONSET_WEIGHT` or the threshold. Widen clips with `PRE_ROLL_S`/`POST_ROLL_S`.
-> HUD ROIs are 1080p defaults — adjust per capture resolution. The GPU/long-run pass on
-> real captures is yours; the unit tests cover the detection logic on synthetic signals.
+> HUD ROIs are 1080p defaults — adjust per capture resolution. **ARAM mode needs OCR**
+> (`pip install pytesseract` + the Tesseract binary) and `imageio` to read the banner;
+> without them `scan_video` finds nothing and ARAM mode returns empty (it never crashes).
+> If multikills are missed, raise `ARAM_SCAN_FPS` or widen `HUD_ROIS["banner"]`. The
+> GPU/long-run pass on real captures is yours; the unit tests cover the detection logic
+> on synthetic signals.
 
 ## Full-Auto Experiment (16:9 YouTube output — the older flow)
 

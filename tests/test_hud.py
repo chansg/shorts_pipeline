@@ -36,6 +36,43 @@ def test_hud_boost_clamps_to_cap():
     assert hud.hud_boost([]) == 0.0
 
 
+def test_multikill_streaks_collapse_escalating_banners_to_top_tier():
+    # One penta fight shows Double->Triple->Quadra->Penta a few seconds apart -> ONE
+    # streak reported as pentakill (not four candidates).
+    evs = [hud.HudEvent("doublekill", 100.0), hud.HudEvent("triplekill", 103.0),
+           hud.HudEvent("quadrakill", 106.0), hud.HudEvent("pentakill", 109.0)]
+    streaks = hud.multikill_streaks(evs, gap=8.0, min_tier="triplekill")
+    assert len(streaks) == 1
+    assert streaks[0].tier == "pentakill"
+    assert streaks[0].start == 100.0 and streaks[0].end == 109.0
+
+
+def test_multikill_streaks_split_by_gap_and_filter_min_tier():
+    evs = [hud.HudEvent("doublekill", 10.0),                 # lone double -> dropped
+           hud.HudEvent("triplekill", 200.0),                # separate fight (gap) -> kept
+           hud.HudEvent("doublekill", 203.0)]                # part of the triple's streak
+    streaks = hud.multikill_streaks(evs, gap=8.0, min_tier="triplekill")
+    assert [s.tier for s in streaks] == ["triplekill"]
+    assert streaks[0].start == 200.0
+
+
+def test_ace_times_dedup():
+    evs = [hud.HudEvent("ace", 50.0), hud.HudEvent("ace", 51.0),   # same ace, dedup
+           hud.HudEvent("ace", 300.0)]
+    assert hud.ace_times(evs, gap=8.0) == [50.0, 300.0]
+
+
+def test_scan_video_is_failsafe_and_uses_banner_roi():
+    # injected frames + a recognizer that returns a penta banner -> a pentakill event;
+    # a raising recognizer -> [] (fail-safe), like scan_window.
+    frames = [(108.0, np.zeros((1080, 1920, 3), dtype=np.uint8))]
+    evs = hud.scan_video("x.mp4", 120.0, enabled=True, frames=iter(frames),
+                         recognizer=lambda c: "PENTA KILL")
+    assert [e.kind for e in evs] == ["pentakill"]
+    assert hud.scan_video("x.mp4", 120.0, enabled=False,
+                          frames=iter(frames), recognizer=lambda c: "PENTA KILL") == []
+
+
 def test_roi_crop_fractional():
     frame = np.zeros((100, 200, 3), dtype=np.uint8)
     crop = hud.roi_crop(frame, (0.5, 0.0, 0.5, 1.0))     # right half

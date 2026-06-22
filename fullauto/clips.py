@@ -55,10 +55,12 @@ class HighlightClip:
 
     @property
     def why(self) -> str:
-        """One-line 'why it was picked' for the review list."""
-        bits = [f"reaction {self.audio_score:.2f}"]
+        """One-line 'why it was picked' for the review list. The HUD event leads when
+        present — the ARAM multikill is the headline; the voice reaction is the tiebreak."""
+        bits = []
         if self.hud_events:
-            bits.append(f"HUD {'+'.join(self.hud_events)} (+{self.hud_boost:.2f})")
+            bits.append("+".join(self.hud_events))
+        bits.append(f"reaction {self.audio_score:.2f}")
         return ", ".join(bits)
 
 
@@ -114,6 +116,71 @@ def rank_windows(video, windows, *, hud_enabled: bool | None = None,
     for i, c in enumerate(clips):
         c.rank = i + 1
     return clips
+
+
+# ---- ARAM (League): multikill-driven candidates -----------------------------
+
+def _window_reaction(score, times, start: float, end: float) -> float:
+    """Max audio-reaction score (0..1) inside [start, end], or 0.0."""
+    if score is None or getattr(score, "size", 0) == 0:
+        return 0.0
+    mask = (times >= start) & (times <= end)
+    return float(score[mask].max()) if mask.any() else 0.0
+
+
+def aram_clips_from_anchors(anchors, total: float, score=None, times=None
+                            ) -> list[HighlightClip]:
+    """PURE (given the audio arrays). Turn (kind, start, end) multikill/ace anchors into
+    ranked HighlightClips: a generous window anchored BEFORE the streak, scored by tier
+    (penta > quadra > ace > triple), with the in-window voice reaction as the tiebreak.
+    Ranked strongest tier first."""
+    clips: list[HighlightClip] = []
+    for kind, s, e in anchors:
+        start = max(0.0, s - gconf.ARAM_PRE_ROLL_S)
+        end = (min(total, e + gconf.ARAM_POST_ROLL_S) if total
+               else e + gconf.ARAM_POST_ROLL_S)
+        tier_w = float(gconf.HUD_EVENT_WEIGHTS.get(kind, 0.4))
+        audio = _window_reaction(score, times, start, end)
+        clips.append(HighlightClip(
+            round(start, 2), round(end, 2), round(audio, 4), round(tier_w, 3),
+            round(tier_w, 4), [kind], [round((s + e) / 2.0, 2)]))
+    # strict tier order; louder reaction breaks ties; then earliest
+    clips.sort(key=lambda c: (-c.score, -c.audio_score, c.start))
+    for i, c in enumerate(clips):
+        c.rank = i + 1
+    return clips
+
+
+def detect_aram_candidates(video, total: float, *, hud_enabled: bool | None = None,
+                           progress: Progress | None = None) -> list[HighlightClip]:
+    """ARAM detection: scan the WHOLE clip for multikill / ace banners, collapse each
+    fight's escalating banners to its top tier, and anchor a candidate on every streak
+    at/above ARAM_MIN_MULTIKILL (+ Aces). The voice reaction in each window is a
+    tiebreak. Needs HUD (OCR); returns [] (with a logged reason) when unavailable."""
+    emit = progress or (lambda m: None)
+    hud_enabled = gconf.HUD_SCAN_ENABLED if hud_enabled is None else hud_enabled
+    if not hud_enabled:
+        emit("  ARAM mode needs the HUD scan enabled (it reads the multikill banner).")
+        return []
+    emit("Scanning the whole clip for multikill / ace banners (ARAM)...")
+    events = hud_mod.scan_video(video, total, enabled=hud_enabled)
+    if not events:
+        emit("  no banners detected — install OCR (pytesseract) and check the banner "
+             "ROI matches your resolution, or use Generic mode.")
+        return []
+    streaks = hud_mod.multikill_streaks(events)
+    aces = hud_mod.ace_times(events) if gconf.ARAM_INCLUDE_ACE else []
+    emit(f"  {len(streaks)} multikill streak(s) >= {gconf.ARAM_MIN_MULTIKILL}"
+         + (f" + {len(aces)} ace(s)" if aces else "")
+         + f"; tiers: {[s.tier for s in streaks] or 'none'}.")
+    anchors = [(s.tier, s.start, s.end) for s in streaks] + [("ace", t, t) for t in aces]
+    if not anchors:
+        emit("  banners found but none reached the minimum tier "
+             f"({gconf.ARAM_MIN_MULTIKILL}); lower ARAM_MIN_MULTIKILL to include them.")
+        return []
+    times, rms = rx.reaction_envelope(video)
+    score = rx.reaction_score(times, rms) if rms.size else None
+    return aram_clips_from_anchors(anchors, total, score=score, times=times)
 
 
 # ---- export (reuses the shared cut + reframe + encode) ----------------------
@@ -183,29 +250,47 @@ def load_manifest(session: AutoSession) -> list[HighlightClip]:
 
 # ---- full run ---------------------------------------------------------------
 
-def run_highlight_detection(video, *, hud_enabled: bool | None = None,
+def run_highlight_detection(video, *, mode: str | None = None,
+                            hud_enabled: bool | None = None,
                             max_candidates: int | None = None,
                             progress: Progress | None = None
                             ) -> tuple[list[HighlightClip], AutoSession]:
-    """Long mp4 -> ranked, exported 9:16 raw candidate clips + candidates.json. Audio
-    detection is the robust core; HUD scan is an isolated booster. Friendly (not a
-    crash) when nothing crosses the threshold."""
+    """Long mp4 -> ranked, exported 9:16 raw candidate clips + candidates.json.
+
+    `mode="generic"` (default): audio-reaction-led detection, HUD as a booster.
+    `mode="aram"` (League ARAM): MULTIKILL-led — candidates are the triple+/penta/ace
+    streaks ONLY (this game mode's money shots), the voice reaction a tiebreak.
+    Friendly (not a crash) when nothing is found."""
     from orchestrator.errors import FriendlyError, ensure_ffmpeg
+    from modules.assemble import _probe_duration
     ensure_ffmpeg()
     video = Path(video)
     if not video.exists():
         raise FriendlyError(f"Video not found: {video}")
     emit = progress or (lambda m: None)
+    mode = (gconf.GAME_MODE if mode is None else mode).lower()
     session = AutoSession(video.stem)
 
-    windows, _total = detect_windows(video, max_candidates=max_candidates,
-                                     progress=progress)
-    if not windows:
-        emit(NO_PEAKS_MSG)
-        write_manifest(session, [])
-        return [], session
+    if mode == "aram":
+        total = float(_probe_duration(video) or 0.0)
+        clips = detect_aram_candidates(video, total, hud_enabled=hud_enabled,
+                                       progress=progress)
+        if max_candidates:
+            clips = clips[:int(max_candidates)]
+        if not clips:
+            emit("No ARAM multikill candidates — see the log above. (ARAM mode only "
+                 "surfaces multikill/ace moments; use Generic mode for reaction clips.)")
+            write_manifest(session, [])
+            return [], session
+    else:
+        windows, _total = detect_windows(video, max_candidates=max_candidates,
+                                         progress=progress)
+        if not windows:
+            emit(NO_PEAKS_MSG)
+            write_manifest(session, [])
+            return [], session
+        clips = rank_windows(video, windows, hud_enabled=hud_enabled, progress=progress)
 
-    clips = rank_windows(video, windows, hud_enabled=hud_enabled, progress=progress)
     emit(f"Exporting {len(clips)} candidate(s) — cut + 9:16 reframe (shared encode)...")
     for c in clips:
         try:

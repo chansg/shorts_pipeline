@@ -349,3 +349,20 @@ HUD_EVENT_LEXICON = {              # recognised HUD text (substring) -> canonica
     "has slain": "kill", "slain an enemy": "kill", "you have slain": "kill",
     "executed": "executed", "have been slain": "death", "was slain": "death",
 }
+
+# ============================================================================
+# Game-mode preset. "aram" (League of Legends ARAM) makes MULTIKILLS the primary
+# candidate driver instead of audio reactions: the WHOLE clip is sampled for the centre
+# multikill / ace banner, the escalating banners of one fight (Double -> Triple -> ... ->
+# Penta) collapse into ONE streak reported at its TOP tier, and each streak at/above
+# ARAM_MIN_MULTIKILL (default triple) becomes a candidate. A loud voice reaction inside
+# the window breaks ties. "generic" keeps the audio-reaction-led detection unchanged.
+# ============================================================================
+GAME_MODE = "generic"               # "generic" | "aram"
+ARAM_TIERS = ["doublekill", "triplekill", "quadrakill", "pentakill"]   # ascending
+ARAM_MIN_MULTIKILL = "triplekill"   # lowest tier that anchors a candidate (infer triple+)
+ARAM_INCLUDE_ACE = True             # also anchor on team Aces (an ARAM money moment)
+ARAM_STREAK_GAP_S = 8.0             # banners within this gap = one escalating streak
+ARAM_PRE_ROLL_S = 10.0             # fight build-up kept BEFORE the streak
+ARAM_POST_ROLL_S = 6.0             # celebration kept AFTER the last banner
+ARAM_SCAN_FPS = 0.5                # whole-clip banner sample rate (banner persists ~3-4s)

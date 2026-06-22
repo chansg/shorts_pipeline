@@ -104,9 +104,14 @@ def _clip_label(c) -> str:
     return f"{c.rank} · {c.start:.0f}-{c.end:.0f}s · score {c.score:.2f} · {hud}"
 
 
-def _do_detect_clips(video, threshold, pre_roll, post_roll, max_candidates, hud_on):
-    """Run audio-reaction (+ optional HUD) detection over a long video and export
-    ranked 9:16 raw candidates. Streams the staged log; persists candidates.json."""
+def _mode_key(mode) -> str:
+    return "aram" if str(mode).lower().startswith("aram") else "generic"
+
+
+def _do_detect_clips(video, mode, threshold, pre_roll, post_roll, max_candidates, hud_on):
+    """Run detection over a long video and export ranked 9:16 raw candidates. Streams
+    the staged log; persists candidates.json. `mode` switches generic audio-reaction vs
+    ARAM multikill-led."""
     if not video:
         raise gr.Error("Upload a long video first.")
     # apply the per-run knobs (calibration surface) before detecting
@@ -116,8 +121,8 @@ def _do_detect_clips(video, threshold, pre_roll, post_roll, max_candidates, hud_
     captured: list[str] = []
     try:
         clip_mod.run_highlight_detection(
-            video, hud_enabled=bool(hud_on), max_candidates=int(max_candidates),
-            progress=captured.append)
+            video, mode=_mode_key(mode), hud_enabled=bool(hud_on),
+            max_candidates=int(max_candidates), progress=captured.append)
     except FriendlyError as fe:
         raise gr.Error(str(fe), duration=None)
     except Exception as e:                       # noqa: BLE001
@@ -165,14 +170,20 @@ def build_fullauto_view(manual_clip_video=None) -> dict:
     with gr.Tab("🎯 Highlight clips → manual"):
         gr.Markdown(
             "### Long video → ranked 9:16 candidate clips\n"
-            "Drop in a lengthy gameplay VOD (hours of League/ARAM). Detection finds "
-            "**funny / rage** moments from **voice reactions** (a sudden “WHAT?!”), "
-            "with League **HUD events** (multikills / aces) as a score booster, and "
-            "exports each as a **generous raw 9:16 clip** to refine in the Gameplay "
-            "tab. No transcript/LLM needed — robust and fast. Thresholds are a "
-            "calibration surface; the log shows the score curve.")
+            "Drop in a lengthy gameplay VOD. **Generic** finds **funny / rage** moments "
+            "from **voice reactions** (a sudden “WHAT?!”) with HUD events as a booster. "
+            "**ARAM (League)** instead hunts **multikills**: it scans the whole clip for "
+            "the centre banner, collapses each fight's escalating banners to its top "
+            "tier, and surfaces every **triple / quadra / penta (+ ace)** as a candidate "
+            "(the voice reaction breaks ties). Each is exported as a **generous raw 9:16 "
+            "clip** to refine in the Gameplay tab. No transcript/LLM needed.")
         hl_video = gr.Video(label="Long video (gameplay VOD / NVIDIA capture)")
         with gr.Row():
+            hl_mode = gr.Dropdown(
+                choices=["Generic (audio reactions)", "ARAM (League multikills)"],
+                value=("ARAM (League multikills)" if gconf.GAME_MODE == "aram"
+                       else "Generic (audio reactions)"),
+                label="Game mode")
             hl_threshold = gr.Slider(0.05, 0.9, value=gconf.REACTION_THRESHOLD,
                                      step=0.05, label="Reaction threshold (lower = more)")
             hl_pre = gr.Slider(2, 20, value=gconf.PRE_ROLL_S, step=1,
@@ -198,7 +209,7 @@ def build_fullauto_view(manual_clip_video=None) -> dict:
 
         hl_detect_btn.click(
             _do_detect_clips,
-            [hl_video, hl_threshold, hl_pre, hl_post, hl_max, hl_hud],
+            [hl_video, hl_mode, hl_threshold, hl_pre, hl_post, hl_max, hl_hud],
             hl_status) \
             .then(_load_clips_ui, hl_video, [hl_gallery, hl_df, hl_refine_dd])
         # preview the chosen candidate's 9:16 clip when the selector changes

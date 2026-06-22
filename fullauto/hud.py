@@ -31,6 +31,18 @@ class HudEvent:
     text: str = ""      # the raw recognised text (debug)
 
 
+@dataclass
+class MultiKill:
+    """One fight's multikill STREAK, reported at its top tier (Double..Penta)."""
+    tier: str           # canonical kind, e.g. "pentakill"
+    start: float        # time of the first banner of the streak
+    end: float          # time of the last (top-tier) banner of the streak
+
+    @property
+    def t(self) -> float:
+        return self.end
+
+
 # ---- PURE: text -> event, events -> boost, ROI crop -------------------------
 
 def normalize_event(text, lexicon=None) -> str | None:
@@ -58,6 +70,46 @@ def hud_boost(events, *, weights=None, cap=None) -> float:
         w = float(weights.get(kind, 0.0))
         best[kind] = max(best.get(kind, 0.0), w)
     return float(min(cap, sum(best.values())))
+
+
+def multikill_streaks(events, *, tiers=None, gap=None, min_tier=None) -> list:
+    """PURE. Collapse multikill banner events into per-fight STREAKS. Banners within
+    `gap` seconds belong to one escalating fight (Double -> Triple -> ... -> Penta), so
+    each streak is reported ONCE at its highest tier (no 4 candidates for one penta).
+    Streaks whose top tier is below `min_tier` are dropped. Returns [MultiKill] by time."""
+    tiers = gconf.ARAM_TIERS if tiers is None else tiers
+    gap = gconf.ARAM_STREAK_GAP_S if gap is None else gap
+    min_tier = gconf.ARAM_MIN_MULTIKILL if min_tier is None else min_tier
+    rank = {k: i for i, k in enumerate(tiers)}
+    mk = sorted((e for e in events if getattr(e, "kind", e) in rank),
+                key=lambda e: e.t)
+    streaks: list[dict] = []
+    cur: dict | None = None
+    for e in mk:
+        if cur is not None and e.t - cur["last"] <= gap:
+            cur["last"] = e.t
+            if rank[e.kind] > rank[cur["tier"]]:
+                cur["tier"] = e.kind
+        else:
+            if cur is not None:
+                streaks.append(cur)
+            cur = {"start": e.t, "last": e.t, "tier": e.kind}
+    if cur is not None:
+        streaks.append(cur)
+    min_rank = rank.get(min_tier, 0)
+    return [MultiKill(s["tier"], round(s["start"], 2), round(s["last"], 2))
+            for s in streaks if rank[s["tier"]] >= min_rank]
+
+
+def ace_times(events, *, gap=None) -> list[float]:
+    """PURE. De-duplicated Ace banner times (an Ace persists several frames; collapse
+    detections within `gap` to the first)."""
+    gap = gconf.ARAM_STREAK_GAP_S if gap is None else gap
+    out: list[float] = []
+    for t in sorted(e.t for e in events if getattr(e, "kind", e) == "ace"):
+        if not out or t - out[-1] > gap:
+            out.append(round(t, 2))
+    return out
 
 
 def roi_crop(frame, roi):
@@ -120,3 +172,17 @@ def scan_window(video, start: float, end: float, *, enabled: bool | None = None,
         return events
     except Exception:        # noqa: BLE001 — HUD is a fail-safe booster, never fatal
         return []
+
+
+def scan_video(video, duration: float, *, sample_fps: float | None = None,
+               roi=None, enabled: bool | None = None, frames=None,
+               recognizer: Callable | None = None) -> list[HudEvent]:
+    """Scan the WHOLE clip (sampled at `sample_fps`) for the centre multikill / ace
+    banner — the ARAM money shots that don't always coincide with a loud reaction.
+    Reuses scan_window's fail-safe machinery, restricted to the banner ROI. Returns []
+    on the master switch being off or any failure (no OCR backend, etc.)."""
+    sample_fps = gconf.ARAM_SCAN_FPS if sample_fps is None else sample_fps
+    roi = gconf.HUD_ROIS.get("banner") if roi is None else roi
+    return scan_window(video, 0.0, float(duration), enabled=enabled,
+                       rois={"banner": roi}, sample_fps=sample_fps,
+                       frames=frames, recognizer=recognizer)
