@@ -22,7 +22,7 @@ from modules.assemble import _run, _has_audio
 from gameplay import config as gconf
 from gameplay import encode as enc
 
-MODES = ("fill", "fit_crop", "blur_pad", "zoom_blur")
+MODES = ("tall", "fill", "fit_crop", "blur_pad", "zoom_blur")
 
 
 def _fill(w: int, h: int, frac: float, x_off: float, y_off: float, fps: int,
@@ -38,6 +38,25 @@ def _fill(w: int, h: int, frac: float, x_off: float, y_off: float, fps: int,
         f"scale=ceil(iw*{z}/2)*2:ceil(ih*{z}/2)*2,"
         f"crop={w}:{h}:(iw-{w})*{x_off}:(ih-{h})*{y_off},"
         f"setsar=1,fps={fps},format=yuv420p[{out}]"
+    )
+
+
+def _tall(w: int, h: int, frac: float, blur: int, x_off: float, y_off: float,
+          fps: int, out: str) -> str:
+    # A FULL-WIDTH gameplay band that fills `frac` of the height (uniform cover-crop, no
+    # stretch), centred over a blurred full-frame fill that shows through as a thin frame
+    # top/bottom. More vertical than blur_pad, more horizontal context than full-crop fill.
+    frac = min(1.0, max(0.4, float(frac)))
+    bh = max(2, (int(round(h * frac)) // 2) * 2)        # band height (even)
+    x_off = min(1.0, max(0.0, float(x_off)))
+    y_off = min(1.0, max(0.0, float(y_off)))
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"boxblur={blur}:1,setsar=1[bgb];"
+        f"[fg]scale={w}:{bh}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{bh}:(iw-{w})*{x_off}:(ih-{bh})*{y_off},setsar=1[fgs];"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto,fps={fps},format=yuv420p[{out}]"
     )
 
 
@@ -71,7 +90,8 @@ def _zoom_blur(w: int, h: int, blur: int, zoom: float, fps: int, out: str) -> st
 def reframe_filter(mode: str | None, w: int, h: int, *, blur: int | None = None,
                    zoom: float | None = None, fps: int | None = None,
                    fill_frac: float | None = None, x_off: float | None = None,
-                   y_off: float | None = None, out_label: str = "v") -> str:
+                   y_off: float | None = None, tall_frac: float | None = None,
+                   out_label: str = "v") -> str:
     """The filter_complex graph (ending in [out_label]) for the given layout mode.
     Unknown modes fall back to blur_pad. Pure string builder — unit-testable."""
     blur = gconf.BLUR_RADIUS if blur is None else blur
@@ -80,6 +100,9 @@ def reframe_filter(mode: str | None, w: int, h: int, *, blur: int | None = None,
     fill_frac = gconf.REFRAME_FILL_FRACTION if fill_frac is None else fill_frac
     x_off = gconf.REFRAME_CROP_X_OFFSET if x_off is None else x_off
     y_off = gconf.REFRAME_CROP_Y_OFFSET if y_off is None else y_off
+    tall_frac = gconf.REFRAME_TALL_HEIGHT_FRAC if tall_frac is None else tall_frac
+    if mode == "tall":
+        return _tall(w, h, tall_frac, blur, x_off, y_off, fps, out_label)
     if mode == "fill":
         return _fill(w, h, fill_frac, x_off, y_off, fps, out_label)
     if mode == "fit_crop":           # cover + centre-crop == fill @ 1.0, centred

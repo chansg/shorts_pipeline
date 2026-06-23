@@ -285,18 +285,24 @@ Built Shorts are encoded for phone sharpness via one shared helper
   near-lossless reframe at `INTERMEDIATE_CRF` 14 + one final encode; +1 only if a
   like/subscribe overlay is used), down from up to four. Effects + captions are
   composed into a single pass. The build log reports the pass count.
-- **Layout modes** (`REFRAME_MODE`, also a GUI dropdown) reclaim the bitrate the
-  blur-pad spends on blurred bars:
-  - `fill` *(default, recommended)* — cover + crop so the gameplay fills the whole
-    1080×1920 at full resolution (**sharpest**, no wasted blur). Loses the far
-    horizontal edges; bias the crop with `REFRAME_CROP_X_OFFSET` (0=left, 0.5=centre,
-    1=right) — e.g. nudge to keep the ARAM minimap. `REFRAME_CROP_Y_OFFSET` and
-    `REFRAME_FILL_FRACTION` (zoom past cover) tune it; all three are GUI sliders.
+- **Layout modes** (`REFRAME_MODE`, also a GUI dropdown). 16:9 → 9:16 with **no stretch**
+  is a trade-off: you crop the sides (more zoom) or blur-pad (waste vertical). The modes
+  sit on that spectrum:
+  - `tall` *(default, recommended for ARAM)* — a **full-width gameplay band** scaled
+    **uniformly (no stretch)** to fill `REFRAME_TALL_HEIGHT_FRAC` (**0.82**) of the
+    height, over a thin blurred frame top/bottom. Uses **far more vertical space than
+    blur-pad** while keeping **more horizontal context than full-crop fill** — so ARAM's
+    wide, busy top-down action reads big and clear without being cropped to the centre.
+    Higher `REFRAME_TALL_HEIGHT_FRAC` = more vertical / more side-crop; lower = more width
+    / thicker frame. `REFRAME_CROP_X_OFFSET`/`_Y_OFFSET` bias the band's crop.
+  - `fill` — cover + crop so the gameplay fills the **whole** frame (**sharpest**, no
+    blur) but zooms ~1.8× and keeps only the centre ~⅓ of the width; bias with
+    `REFRAME_CROP_X_OFFSET` and `REFRAME_FILL_FRACTION` (GUI sliders).
   - `fit_crop` — `fill` at fraction 1.0, centred.
-  - `blur_pad` — full frame centred over a blurred fill (no crop; the old default).
+  - `blur_pad` — full frame centred over a blurred fill (no crop; most pixels are blur).
   - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`.
 
-  With `fill`, captions default to `CAPTION_POS_Y_FRAC` 0.72 — a readable lower band
+  Captions default to `CAPTION_POS_Y_FRAC` 0.72 — a readable lower band
   that sits **above** the centred (~0.84) like/subscribe overlay, so caption and banner
   never fight the game's centre HUD or each other. It's a GUI slider per build.
 

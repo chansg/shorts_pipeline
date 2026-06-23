@@ -127,10 +127,19 @@ INTERMEDIATE_PRESET = "medium"
 #   "blur_pad"           — full frame centred over a blurred fill (no crop, but a ~16:9
 #                          strip carries the action; most pixels are blur).
 #   "zoom_blur"          — blur-pad with the centred gameplay band scaled up.
-REFRAME_MODE = "fill"        # "fill" | "fit_crop" | "blur_pad" | "zoom_blur"
+#   "tall" (DEFAULT)     — a FULL-WIDTH gameplay band, uniformly scaled (NO stretch), that
+#                          fills REFRAME_TALL_HEIGHT_FRAC of the 1920 height with a thin
+#                          blurred frame top/bottom. Uses much more vertical space than
+#                          blur_pad while keeping MORE horizontal context than full-crop
+#                          fill — the sweet spot for ARAM's wide, busy top-down action
+#                          (big readable detail without cropping the mayhem to the centre).
+REFRAME_MODE = "tall"        # "tall" | "fill" | "fit_crop" | "blur_pad" | "zoom_blur"
+# tall: fraction of the 1920 height the gameplay band fills (full width, no stretch).
+# Higher = more vertical / more side-crop; lower = more width kept / thicker blur frame.
+REFRAME_TALL_HEIGHT_FRAC = 0.82
 REFRAME_FILL_FRACTION = 1.0  # fill: zoom past cover (>=1.0; 1.0 = just fills the frame)
-REFRAME_CROP_X_OFFSET = 0.5  # fill: horizontal crop bias (0=left, 0.5=centre, 1=right)
-REFRAME_CROP_Y_OFFSET = 0.5  # fill: vertical crop bias (0=top, 0.5=centre, 1=bottom)
+REFRAME_CROP_X_OFFSET = 0.5  # fill/tall: horizontal crop bias (0=left, 0.5=centre, 1=right)
+REFRAME_CROP_Y_OFFSET = 0.5  # fill/tall: vertical crop bias (0=top, 0.5=centre, 1=bottom)
 ZOOM_BLUR_SCALE = 1.4        # zoom_blur: enlarge the centred gameplay band by this factor
 BLUR_RADIUS = 24        # boxblur luma radius for the top/bottom filler
 BLUR_BG_BOOST = 1.05    # slightly scale the blurred bg past cover so edges are clean

@@ -444,7 +444,8 @@ def build_gameplay_tab() -> "gr.Video":
             refresh_ov_btn = gr.Button("↻ overlays")
         with gr.Row():
             reframe_mode_dd = gr.Dropdown(
-                choices=[("Fill (gameplay fills frame — recommended)", "fill"),
+                choices=[("Tall (big full-width band — recommended for ARAM)", "tall"),
+                         ("Fill (zoom + crop to fill the frame)", "fill"),
                          ("Fit & crop (fill, centred)", "fit_crop"),
                          ("Blur-pad (full frame, blurred bars)", "blur_pad"),
                          ("Zoom blur-pad (bigger gameplay band)", "zoom_blur")],
