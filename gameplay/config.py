@@ -146,7 +146,7 @@ CAPTION_POS_Y_FRAC = 0.72
 SPEAKER_PALETTE = list(DEFAULT_SPEAKER_PALETTE)  # offered in the transcript editor
 # When diarization finds no/one speaker, seed this many default SPEAKER_NN rows in
 # the colour grid (palette hex) so it's never empty and the user has starter colours.
-DEFAULT_SPEAKER_ROWS = 2
+DEFAULT_SPEAKER_ROWS = 5
 # Render-side defence in depth (independent of the ASR clamp above):
 CAPTION_MAX_EVENT_S = 1.2        # no single caption stays on screen longer than this
 CAPTION_MAX_LINE_CHARS = 12      # wrap/hard-split so no line exceeds the frame width

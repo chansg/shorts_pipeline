@@ -33,6 +33,12 @@ DEFAULT_SPEAKER_PALETTE: list[tuple[int, int, int]] = [
     (255, 64, 129),   # hot pink
     (255, 145, 0),    # orange
     (179, 136, 255),  # violet
+    (255, 82, 82),    # red
+    (64, 196, 255),   # light blue
+    (255, 215, 64),   # amber/gold
+    (224, 64, 251),   # magenta
+    (29, 233, 182),   # teal
+    (255, 138, 101),  # coral
 ]
 
 

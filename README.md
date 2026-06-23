@@ -152,11 +152,14 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    spreadsheet. *These rows are the captions.*
    - **↑/↓** or **Enter** walk the rows; type to fix a word in the whole-row field — no
      double-click-per-cell.
-   - **Alt+1…N** set the active row's speaker (or a **shift-selected range** — click a
-     colour chip, shift-click another) in ONE action; **Alt+B** sets the speaker for
-     **all rows below** (the diariser often flips mid-clip); **Alt+D** deletes a row.
-   - The speaker **colour chip** is inline so the A/B mapping is obvious as you assign;
-     rename/recolour speakers in the colour grid below.
+   - A row of coloured **speaker buttons** (5 by default — `DEFAULT_SPEAKER_ROWS`) sets
+     the active row's speaker (or a **shift-selected range** — click a row chip,
+     shift-click another) in ONE click; **Alt+1…N** are the keyboard equivalents.
+     **Alt+B** sets the speaker for **all rows below** (the diariser often flips
+     mid-clip); **Alt+D** deletes a row.
+   - The speaker **colour chip** is inline so the mapping is obvious as you assign;
+     rename/recolour speakers in the colour grid below. The palette
+     (`DEFAULT_SPEAKER_PALETTE`) has 12 distinct bright colours.
    - Profanity **auto-censors at build**; click **🔇** on a row to force it.
    - The **Bulk edits & caption preview** panel still has the button forms of the same
      ops (reusing `gameplay/editing.py`): multi-row speaker assign, find/replace,

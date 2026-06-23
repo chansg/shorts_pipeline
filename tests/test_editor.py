@@ -56,6 +56,28 @@ def test_speaker_colours_palette_by_order():
     assert set(colors) == {"A", "B"} and colors["A"] != colors["B"]
 
 
+def test_speaker_colours_grid_order_stable():
+    # the colour grid defines the order (and the Alt+N / button mapping); speakers used
+    # in the rows but not in the grid are appended after.
+    spk = [["SPEAKER_00", "#ff0000"], ["SPEAKER_01", ""], ["SPEAKER_02", ""]]
+    rows = [["hi", "SPEAKER_02", 0, 0.1, False], ["yo", "Ghost", 0.1, 0.2, False]]
+    colors = ed.speaker_colors(rows, spk)
+    assert list(colors)[:3] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02"]  # grid order
+    assert colors["SPEAKER_00"] == "#ff0000"                 # explicit hex kept
+    assert colors["SPEAKER_01"].startswith("#")              # palette filled
+    assert list(colors)[-1] == "Ghost"                       # extra speaker appended
+
+
+def test_render_has_clickable_speaker_buttons():
+    spk = [["SPEAKER_00", "#ff0000"], ["SPEAKER_01", "#00ff00"]]
+    out = ed.render_editor([["hi", "SPEAKER_00", 0, 0.4, False]], spk)
+    assert out.count('class="txe-spk"') == 2                 # one button per speaker
+    assert 'data-idx="0"' in out and 'data-idx="1"' in out
+    assert "--c:#ff0000" in out                              # button carries the colour
+    # the controller JS wires the buttons -> setSpeaker
+    assert "wireSpeakerButtons" in ed.SETUP_JS and "txe-spk" in ed.SETUP_JS
+
+
 def test_editor_feeds_same_caption_output_as_rows():
     # equivalence: rows that came from the old grid produce identical caption tuples
     # whether read directly or round-tripped through the editor's embed/commit/parse.

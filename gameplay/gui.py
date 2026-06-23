@@ -51,19 +51,25 @@ def _hex_to_rgb(h):
 
 
 def _speaker_rows(t: Transcript):
-    """Prefill the speaker→colour grid with palette hex colours.
-
-    With detected speakers, each gets the colour the renderer would auto-assign.
-    With none (single-speaker, or diarization collapsed to one), seed a few default
-    `SPEAKER_NN` rows in palette hex so the grid is never empty — the user has
-    starter colours and can name/assign speakers in the transcript grid. Unused
-    rows are harmless (a colour only applies to a speaker that appears in a cue)."""
-    speakers = list(t.speakers) or [
-        f"SPEAKER_{i:02d}" for i in range(gconf.DEFAULT_SPEAKER_ROWS)]
-    rows = []
-    for i, s in enumerate(speakers):
-        rgb = gconf.SPEAKER_PALETTE[i % len(gconf.SPEAKER_PALETTE)]
+    """Prefill the speaker→colour grid (and the editor's speaker buttons) with palette
+    hex colours. Detected speakers come first (each the colour the renderer auto-assigns),
+    then we PAD with default `SPEAKER_NN` rows up to DEFAULT_SPEAKER_ROWS so there are
+    always at least that many speakers to assign to — handy when the diariser found fewer
+    than were really talking. An unused speaker row is harmless (a colour only applies to
+    a speaker that appears in a cue)."""
+    rows, seen = [], set()
+    for s in t.speakers:
+        rgb = gconf.SPEAKER_PALETTE[len(rows) % len(gconf.SPEAKER_PALETTE)]
         rows.append([s, _rgb_to_hex(rgb)])
+        seen.add(s)
+    i = 0
+    while len(rows) < gconf.DEFAULT_SPEAKER_ROWS:
+        name = f"SPEAKER_{i:02d}"
+        if name not in seen:
+            rgb = gconf.SPEAKER_PALETTE[len(rows) % len(gconf.SPEAKER_PALETTE)]
+            rows.append([name, _rgb_to_hex(rgb)])
+            seen.add(name)
+        i += 1
     return rows
 
 

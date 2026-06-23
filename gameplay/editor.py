@@ -39,26 +39,24 @@ def _hex(rgb) -> str:
 
 
 def speaker_colors(rows, spk_rows=None) -> dict:
-    """speaker -> hex colour: an explicit hex from the colour grid wins, otherwise a
-    palette colour assigned in order of first appearance (matches the caption renderer)."""
-    explicit: dict[str, str] = {}
+    """Ordered speaker -> hex colour map (this order is also the editor's speaker-button
+    order and the Alt+1..N mapping). The colour grid's speakers come FIRST in grid order
+    (so the buttons are stable), each its explicit hex if set else a palette colour by
+    position; then any extra speaker that appears in the rows but isn't in the grid."""
+    pal = list(DEFAULT_SPEAKER_PALETTE)
+    out: dict[str, str] = {}
     for r in (spk_rows or []):
         r = list(r) + ["", ""]
         name = str(r[0] or "").strip()
+        if not name or name in out:
+            continue
         hexv = str(r[1] or "").strip()
-        if name and hexv:
-            explicit[name] = hexv if hexv.startswith("#") else "#" + hexv
-    order: list[str] = []
-    for row in (rows or []):
+        out[name] = (hexv if hexv.startswith("#") else "#" + hexv) if hexv \
+            else _hex(pal[len(out) % len(pal)])
+    for row in (rows or []):                     # speakers used in text but not in grid
         s = str((list(row) + ["", ""])[1] or "").strip()
-        if s and s not in order:
-            order.append(s)
-    pal = list(DEFAULT_SPEAKER_PALETTE)
-    out: dict[str, str] = {}
-    for i, name in enumerate(order):
-        out[name] = explicit.get(name, _hex(pal[i % len(pal)]))
-    for name, hx in explicit.items():           # explicit speakers not yet seen in text
-        out.setdefault(name, hx)
+        if s and s not in out:
+            out[s] = _hex(pal[len(out) % len(pal)])
     return out
 
 
@@ -78,23 +76,27 @@ def render_editor(rows, spk_rows=None) -> str:
     colors = speaker_colors(rows, spk_rows)
     data = html.escape(json.dumps(rows), quote=True)
     spk = html.escape(json.dumps(colors), quote=True)
-    legend = "".join(
-        f'<span class="txe-leg"><b style="background:{html.escape(c)}"></b>'
-        f'Alt+{i + 1} {html.escape(n)}</span>'
+    # the legend is now a row of clickable SPEAKER BUTTONS — click one to set the active
+    # row's (or a shift-selected range's) speaker; the same as the Alt+1..N hotkey.
+    buttons = "".join(
+        f'<button type="button" class="txe-spk" data-idx="{i}" '
+        f'style="--c:{html.escape(c)}" title="Set speaker {i + 1} (Alt+{i + 1})">'
+        f'<b></b>{i + 1} · {html.escape(n)}</button>'
         for i, (n, c) in enumerate(colors.items()))
     if not rows:
-        return ('<div class="txe-wrap"><div class="txe-help">Transcribe a clip to '
-                'populate the fast editor.</div></div>')
+        return ('<div class="txe-wrap">' + _STYLE + '<div class="txe-help">Transcribe a '
+                'clip to populate the fast editor.</div>'
+                f'<div class="txe-legend">{buttons}</div></div>')
     return (
         '<div class="txe-wrap">'
         + _STYLE
         + '<div class="txe-help">'
-        '<b>↑/↓</b> or <b>Enter</b> move · type to fix the word · '
-        '<b>Alt+1…N</b> set speaker (active row, or a shift-selected range) · '
-        '<b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete row · '
-        'click a colour chip to select · click 🔇 to censor. '
+        '<b>↑/↓</b> or <b>Enter</b> move · type to fix the word · click a '
+        '<b>speaker button</b> (or <b>Alt+1…N</b>) to set the active row / a '
+        'shift-selected range · <b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete '
+        'row · click a row chip to select · click 🔇 to censor. '
         '<span id="txe-selinfo"></span></div>'
-        f'<div class="txe-legend">{legend}</div>'
+        f'<div class="txe-legend">{buttons}</div>'
         f'<div id="{ROOT_ELEM_ID}" data-rows="{data}" data-speakers="{spk}"></div>'
         '</div>'
     )
@@ -116,8 +118,13 @@ def parse_bridge(payload):
 _STYLE = """<style>
 .txe-wrap{font-family:ui-monospace,Consolas,monospace;}
 .txe-help{font-size:12px;opacity:.8;margin:2px 0 6px;}
-.txe-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px;font-size:12px;}
-.txe-leg b{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:middle;}
+.txe-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+.txe-spk{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font:inherit;
+  font-size:12px;color:#e6edf3;background:#161b22;border:1px solid #30363d;
+  border-radius:7px;padding:4px 10px;}
+.txe-spk:hover{border-color:#7d88ff;background:#1c2230;}
+.txe-spk:active{transform:translateY(1px);}
+.txe-spk b{width:12px;height:12px;border-radius:3px;background:var(--c);display:inline-block;}
 #tx-root .tx-row{display:flex;align-items:center;gap:6px;padding:1px 2px;border-radius:4px;}
 #tx-root .tx-row.active{background:rgba(120,120,255,.18);}
 #tx-root .tx-row.sel{background:rgba(120,120,255,.30);}
@@ -164,6 +171,19 @@ SETUP_JS = r"""
     const name=root.__spk[idx]; if(name==null) return;
     targets.forEach(i=>{ if(root.__rows[i]) root.__rows[i][1]=name; });
     render(root); commit(root);
+    if(targets.length===1 && targets[0]!=null) focusRow(root,targets[0]);  // keep nav
+  }
+  function wireSpeakerButtons(root){
+    const wrap=root.closest('.txe-wrap'); if(!wrap) return;
+    wrap.querySelectorAll('.txe-spk').forEach(btn=>{
+      btn.onmousedown=(e)=>e.preventDefault();   // don't steal focus/selection on press
+      btn.onclick=()=>{
+        const idx=+btn.dataset.idx;
+        const t = root.__sel.size ? [...root.__sel] : (root.__active!=null ? [root.__active] : []);
+        if(!t.length) return;                     // nothing active/selected yet
+        setSpeaker(root,t,idx); root.__sel.clear(); updateSel(root);
+      };
+    });
   }
   function onKey(root,e,i){
     if(e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; commit(root); if(i+1<root.__rows.length) focusRow(root,i+1); }
@@ -200,6 +220,7 @@ SETUP_JS = r"""
     try{ root.__colors=JSON.parse(root.dataset.speakers||'{}'); }catch(e){ root.__colors={}; }
     root.__spk=Object.keys(root.__colors); root.__sel=new Set(); root.__active=null;
     render(root);
+    wireSpeakerButtons(root);
   }
   function scan(){
     document.querySelectorAll('#tx-root').forEach(root=>{
