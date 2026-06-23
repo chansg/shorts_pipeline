@@ -154,6 +154,10 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
      double-click-per-cell. **Enter on the last row** (or **Alt+Enter**, or the **＋ Add
      row** button) inserts a row — timed right after the previous word — so you can add
      words the ASR dropped.
+   - Each row has editable **start/end** second fields, a **⏱** button that snaps the
+     row's start to the **video's current playhead** (scrub the clip, click ⏱ to sync a
+     caption), **▲/▼** (or **Alt+↑/↓**) to **reorder**, and **✕** (or **Alt+D**) to
+     delete. Rows always display in time order (editing a time re-sorts it into place).
    - A row of coloured **speaker buttons** (5 by default — `DEFAULT_SPEAKER_ROWS`) sets
      the active row's speaker (or a **shift-selected range** — click a row chip,
      shift-click another) in ONE click; **Alt+1…N** are the keyboard equivalents.
