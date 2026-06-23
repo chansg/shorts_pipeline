@@ -151,7 +151,9 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    bottleneck, so the editor (`gameplay/editor.py`) is built for speed, *not* a
    spreadsheet. *These rows are the captions.*
    - **↑/↓** or **Enter** walk the rows; type to fix a word in the whole-row field — no
-     double-click-per-cell.
+     double-click-per-cell. **Enter on the last row** (or **Alt+Enter**, or the **＋ Add
+     row** button) inserts a row — timed right after the previous word — so you can add
+     words the ASR dropped.
    - A row of coloured **speaker buttons** (5 by default — `DEFAULT_SPEAKER_ROWS`) sets
      the active row's speaker (or a **shift-selected range** — click a row chip,
      shift-click another) in ONE click; **Alt+1…N** are the keyboard equivalents.

@@ -68,6 +68,19 @@ def test_speaker_colours_grid_order_stable():
     assert list(colors)[-1] == "Ghost"                       # extra speaker appended
 
 
+def test_render_has_add_row_affordance():
+    out = ed.render_editor([["hi", "S0", 0, 0.4, False]])
+    assert 'class="txe-add"' in out                  # visible "+ Add row" button
+    assert "Alt+Enter" in out                          # the hotkey is documented
+    assert "addRow" in ed.SETUP_JS                      # controller can insert rows
+    # a committed added row (blank timing inferred client-side, or 0/0) still builds:
+    # Transcript.from_rows keeps a text row and infers timing, so the word isn't lost.
+    from gameplay.transcript import Transcript
+    rows = ed.parse_bridge('[["off?","S0",13.0,13.4,false],["last","S0",13.4,13.9,false]]')
+    t = Transcript.from_rows(rows)
+    assert [w.text for w in t.words] == ["off?", "last"] and t.words[1].start == 13.4
+
+
 def test_render_has_clickable_speaker_buttons():
     spk = [["SPEAKER_00", "#ff0000"], ["SPEAKER_01", "#00ff00"]]
     out = ed.render_editor([["hi", "SPEAKER_00", 0, 0.4, False]], spk)

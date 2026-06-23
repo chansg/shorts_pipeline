@@ -91,11 +91,13 @@ def render_editor(rows, spk_rows=None) -> str:
         '<div class="txe-wrap">'
         + _STYLE
         + '<div class="txe-help">'
-        '<b>↑/↓</b> or <b>Enter</b> move · type to fix the word · click a '
-        '<b>speaker button</b> (or <b>Alt+1…N</b>) to set the active row / a '
-        'shift-selected range · <b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete '
-        'row · click a row chip to select · click 🔇 to censor. '
-        '<span id="txe-selinfo"></span></div>'
+        '<b>↑/↓</b> move · <b>Enter</b> next row (or add one at the end) · type to fix '
+        'the word · click a <b>speaker button</b> (or <b>Alt+1…N</b>) to set the active '
+        'row / a shift-selected range · <b>Alt+Enter</b> insert a row below · '
+        '<b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete row · click a row chip '
+        'to select · click 🔇 to censor. '
+        '<button type="button" class="txe-add" title="Add a row (Alt+Enter)">＋ Add '
+        'row</button> <span id="txe-selinfo"></span></div>'
         f'<div class="txe-legend">{buttons}</div>'
         f'<div id="{ROOT_ELEM_ID}" data-rows="{data}" data-speakers="{spk}"></div>'
         '</div>'
@@ -125,6 +127,9 @@ _STYLE = """<style>
 .txe-spk:hover{border-color:#7d88ff;background:#1c2230;}
 .txe-spk:active{transform:translateY(1px);}
 .txe-spk b{width:12px;height:12px;border-radius:3px;background:var(--c);display:inline-block;}
+.txe-add{cursor:pointer;font:inherit;font-size:12px;color:#e6edf3;background:#21304a;
+  border:1px solid #3b5b8c;border-radius:6px;padding:2px 9px;margin-left:4px;}
+.txe-add:hover{background:#2a3d5e;border-color:#7d88ff;}
 #tx-root .tx-row{display:flex;align-items:center;gap:6px;padding:1px 2px;border-radius:4px;}
 #tx-root .tx-row.active{background:rgba(120,120,255,.18);}
 #tx-root .tx-row.sel{background:rgba(120,120,255,.30);}
@@ -184,9 +189,24 @@ SETUP_JS = r"""
         setSpeaker(root,t,idx); root.__sel.clear(); updateSel(root);
       };
     });
+    const add=wrap.querySelector('.txe-add');
+    if(add){ add.onmousedown=(e)=>e.preventDefault(); add.onclick=()=>addRow(root, root.__active); }
+  }
+  function addRow(root,after){
+    // insert a blank row after index `after` (null/last -> append). Inherit the previous
+    // row's speaker; time it right after that row (start = prev.end, +0.5s) so a word the
+    // ASR dropped lands in sequence. Focus it so the user types immediately.
+    const n=root.__rows.length;
+    let idx=(after==null||after<0||after>=n)?n:after+1;
+    const prev=root.__rows[idx-1]||root.__rows[n-1];
+    const start=prev?(Number(prev[3])||Number(prev[2])||0):0;
+    const spk=prev?prev[1]:'';
+    root.__rows.splice(idx,0,['',spk,start,Math.round((start+0.5)*1000)/1000,false]);
+    render(root); commit(root); focusRow(root,idx);
   }
   function onKey(root,e,i){
-    if(e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; commit(root); if(i+1<root.__rows.length) focusRow(root,i+1); }
+    if(e.altKey && e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; addRow(root,i); }
+    else if(e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; commit(root); if(i+1<root.__rows.length) focusRow(root,i+1); else addRow(root,i); }
     else if(e.key==='ArrowDown' && !e.shiftKey){ e.preventDefault(); if(i+1<root.__rows.length) focusRow(root,i+1); }
     else if(e.key==='ArrowUp' && !e.shiftKey){ e.preventDefault(); if(i>0) focusRow(root,i-1); }
     else if(e.altKey && e.key>='1' && e.key<='9'){ e.preventDefault(); const t=root.__sel.size?[...root.__sel]:[i]; setSpeaker(root,t,(+e.key)-1); root.__sel.clear(); }
