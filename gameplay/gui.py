@@ -58,9 +58,13 @@ def _speaker_rows(t: Transcript):
     than were really talking. An unused speaker row is harmless (a colour only applies to
     a speaker that appears in a cue)."""
     rows, seen = [], set()
+    style_map = getattr(gconf, "SPEAKER_STYLE_MAP", None) or {}
     for s in t.speakers:
-        rgb = gconf.SPEAKER_PALETTE[len(rows) % len(gconf.SPEAKER_PALETTE)]
-        rows.append([s, _rgb_to_hex(rgb)])
+        # config SPEAKER_STYLE_MAP gives a label its caption colour (per-batch override);
+        # unmapped labels fall back to the auto palette. The grid still overrides per-clip.
+        hexv = style_map.get(s) or _rgb_to_hex(
+            gconf.SPEAKER_PALETTE[len(rows) % len(gconf.SPEAKER_PALETTE)])
+        rows.append([s, hexv])
         seen.add(s)
     i = 0
     while len(rows) < gconf.DEFAULT_SPEAKER_ROWS:
@@ -169,12 +173,14 @@ def _do_transcribe(video, diarize, speakers, clip_name):
     emit("Importing clip...")
     yield "\n".join(log)
     try:
-        clip = transcribe_mod.import_source(video, name=clip_name or None)
-        # transcribe_clip drives `emit`; we can't interleave yields from inside a
-        # blocking call, so we surface the staged messages it logs on return.
+        # transcribe_clip (and import_source's voice-track detection) drive `emit`; we
+        # can't interleave yields from inside a blocking call, so we surface the staged
+        # messages they log on return.
         captured: list[str] = []
+        clip = transcribe_mod.import_source(
+            video, name=clip_name or None, progress=captured.append)
         transcribe_mod.transcribe_clip(
-            clip, progress=lambda m: captured.append(m), force=True,
+            clip, progress=captured.append, force=True,
             diarize=bool(diarize), num_speakers=num_speakers)
         log.extend(captured)
         yield "\n".join(log)
@@ -338,7 +344,7 @@ def build_gameplay_tab() -> "gr.Video":
             clip_video = gr.Video(label="Gameplay clip (pre-trimmed)")
             with gr.Column():
                 diarize_cb = gr.Checkbox(
-                    value=True,
+                    value=gconf.DIARIZE_ENABLED,
                     label="Diarize speakers (needs HF_TOKEN; else single-speaker)")
                 speakers_dd = gr.Dropdown(
                     choices=["Auto", "1", "2", "3", "4", "5"], value="Auto",

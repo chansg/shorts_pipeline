@@ -49,6 +49,25 @@ DIARIZE_MAX_SPEAKERS = 6           # 4-5 people expected; a little headroom
 # two people talking AT ONCE — single-stream ASR transcribes overlap as one voice; true
 # cross-talk separation needs a source-separation stage (see README).
 DIARIZE_NUM_SPEAKERS = None
+DIARIZE_ENABLED = True             # default for the GUI "Diarize" toggle (needs HF_TOKEN;
+                                   # with no token the run logs that + uses single-speaker)
+
+# --- Clean-voice transcription (OBS multi-track recordings) ---
+# OBS can record Track 1 = full mix (game + mic + Discord — the VIEWER audio) and Track 2
+# = voice only (mic + Discord, no game audio). When a recording has >=2 audio tracks we
+# transcribe Track 2 so WhisperX gets clean speech (game SFX/music no longer buries the
+# voice -> far less dropout / better word timing). The viewer-facing audio (Track 1) and
+# the final mux are UNTOUCHED — only the transcription input changes. Single-track
+# recordings fall back to the mixed track (a:0) with a WARNING (still process, no crash).
+TRANSCRIBE_VOICE_TRACK = True      # use the isolated voice track when >=2 audio tracks
+VOICE_TRACK_INDEX = 1              # 0-based audio stream index of the voice (a:1 = Track 2)
+KEEP_PREP_AUDIO = False            # keep the extracted 16k voice/mix wav for debugging
+# Per-speaker caption styling. pyannote labels (SPEAKER_00, ...) are NOT stable across
+# recordings, so map them to a caption colour per batch by eyeballing the speakers.json
+# sidecar written next to the transcript (each label + a sample line). label -> hex;
+# unmapped labels fall back to the auto palette, and the editor's colour grid overrides
+# this per-clip. (For our pipeline a per-speaker "style" is its caption colour.)
+SPEAKER_STYLE_MAP: dict = {}
 # ASR anti-hallucination (noisy gameplay audio).
 #
 # IMPORTANT: WhisperX runs *batched* inference (asr.py:generate_segment_batched).

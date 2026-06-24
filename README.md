@@ -225,9 +225,36 @@ your GPU, token, and accepted licence).
 > Starlette print a `StarletteDeprecationWarning` on *every* request; it's noise, not a
 > failed request or a loop. `app.py` silences just that message.
 
+### Clean-voice transcription (OBS multi-track) — the upstream fix
+
+The cleanest way to fix caption dropout is to never mix game audio into the
+transcription input. Configure OBS to record **two audio tracks** into one MP4:
+
+- **Track 1 (`a:0`)** = full mix (game + mic + Discord) — the **viewer audio**.
+- **Track 2 (`a:1`)** = voice only (mic + Discord, no game audio).
+
+When an uploaded recording has **≥ 2 audio tracks**, the pipeline transcribes **Track 2**
+so WhisperX/VAD/diarization see clean speech (no SFX/music to bury or hallucinate over).
+The extraction happens at **import** (`gameplay/transcribe.py:_extract_voice_track`), from
+the original recording, into a cached `_voice16k.wav` — *before* normalisation, which keeps
+only the mixed track. **The viewer-facing audio and the final mux are untouched** — only
+the transcription input changes. Single-track (old) recordings still process: they fall
+back to the mixed track `a:0` with a **WARNING** in the transcribe log. Knobs in
+`gameplay/config.py`: `TRANSCRIBE_VOICE_TRACK` (default on), `VOICE_TRACK_INDEX` (`1` = a:1),
+`KEEP_PREP_AUDIO` (keep the work wav for debugging).
+
+Diarization labels (`SPEAKER_00`, …) are **not stable across recordings**, so identity
+assignment stays manual. After a diarized run the pipeline writes a `speakers.json` sidecar
+next to the transcript listing each label + a sample line (and logs the same), so you can
+eyeball which label is you. Map a label → caption colour per batch with
+`SPEAKER_STYLE_MAP` (label → hex; unmapped labels use the auto palette), and the editor's
+colour grid overrides it per clip. *Upgrade path (not built): putting your mic on its own
+track and Discord on another removes the guessing entirely — Track 2 is definitively you.*
+
 ### Noisy game audio (transcript quality)
 
-Loud game audio over voice chat used to break the transcript two ways: a **massive
+These knobs still apply to single-track recordings (no separate voice track). Loud game
+audio over voice chat used to break the transcript two ways: a **massive
 dropout** (whole speech regions missing) and a **repetition collapse** (one "word"
 of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
 `gameplay/transcribe.py` + `gameplay/config.py`:
