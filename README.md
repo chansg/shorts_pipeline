@@ -459,6 +459,16 @@ OBS recordings and it writes the **top-5 raw highlight trims** per source for ma
 finishing — **no reframe, captions, or overlay** (those happen later in manual mode).
 Distinct from the 9:16 flow above; these are raw cuts that **preserve BOTH audio tracks**.
 
+Run it from the **GUI** or the **CLI** — both call the same `run_batch` core in-process:
+
+- **GUI** (no command line): launch `python app.py` → the **Full-Auto** landing →
+  **📁 Candidate export (batch)** tab. Hand-pick MP4s or set a folder (defaults to
+  `CAND_INPUT_DIR`) and an output folder (`CAND_OUTPUT_DIR`), hit **Run candidate export**,
+  watch per-source/stage/clip progress stream live, then read the per-source results table
+  and **Open output folder**. The run is on a worker thread (the UI never freezes), one bad
+  source is logged and skipped, and single-track / missing-Tesseract warnings show in the log.
+- **CLI:**
+
 ```bash
 # default folder (config.CAND_INPUT_DIR) -> config.CAND_OUTPUT_DIR
 python -m fullauto.candidates
