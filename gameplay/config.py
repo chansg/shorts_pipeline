@@ -375,3 +375,40 @@ ARAM_STREAK_GAP_S = 8.0             # banners within this gap = one escalating s
 ARAM_PRE_ROLL_S = 10.0             # fight build-up kept BEFORE the streak
 ARAM_POST_ROLL_S = 6.0             # celebration kept AFTER the last banner
 ARAM_SCAN_FPS = 0.5                # whole-clip banner sample rate (banner persists ~3-4s)
+
+# ============================================================================
+# Candidate-export stage (fullauto.candidates) — batch a folder of long OBS
+# recordings into the top-N raw 60-90s highlight TRIMS per source for manual
+# finishing. Distinct from the 9:16-reframing highlight flow above: these are RAW
+# cuts (no reframe/captions/overlay) that PRESERVE BOTH AUDIO TRACKS, so the
+# downstream clean-voice transcription still has Track 2. Voice energy drives
+# `banter` candidates; HUD OCR kill banners drive `play` candidates.
+# ============================================================================
+CAND_INPUT_DIR = Path(os.environ.get("CAND_INPUT_DIR", r"C:\Users\chansg\Videos"))
+CAND_OUTPUT_DIR = Path(os.environ.get(
+    "CAND_OUTPUT_DIR", r"C:\Users\chansg\Documents\AshenChan\cand"))
+CANDIDATES_PER_SOURCE = 5           # top-N kept per source (export fewer if fewer qualify)
+CLIP_MIN_SECONDS = 60               # candidate trim length target (lower bound)
+CLIP_MAX_SECONDS = 90               # candidate trim length target (upper bound)
+MIN_GAP_SECONDS = 120              # min spacing between chosen peaks (spread across the VOD)
+VOICE_TRACK_INDEX = 1               # 0-based audio stream to analyse (a:1 = OBS voice track)
+
+# Voice-energy signal (reuses the streamed vocal band-pass reaction detector).
+ENERGY_WINDOW_S = 0.5               # RMS envelope window (s); reaction score reuses this
+WEIGHT_VOICE = 1.0                  # voice-energy contribution to the interest score
+WEIGHT_OCR = 1.5                    # OCR-event contribution (a kill banner outweighs banter)
+
+# HUD OCR signal (event detection + `play` tagging). Fail-safe: missing Tesseract ->
+# audio-only with a warning; per-frame OCR errors are skipped, never abort the batch.
+OCR_SAMPLE_FPS = 1.5               # whole-clip frame sample rate for OCR (low on purpose)
+OCR_CROP = (0.30, 0.20, 0.40, 0.18)  # (x,y,w,h) fractions — centre multikill banner; None=full
+OCR_KEYWORDS = ["Pentakill", "Quadra Kill", "Triple Kill", "Double Kill",
+                "Ace", "Shutdown", "Clutch", "Victory"]   # extend freely
+OCR_FUZZY_THRESHOLD = 0.78         # 0..1 fuzzy-match ratio (Tesseract misreads characters)
+
+# Export encode. NVENC by default (RTX 3080); swap CAND_ENCODER to "libx264" for CPU CRF.
+# Quality maps to -cq (nvenc) / -crf (libx264). Audio is re-encoded to AAC (both tracks)
+# to avoid cut-point sync gremlins.
+CAND_ENCODER = "h264_nvenc"        # "h264_nvenc" | "libx264"
+CAND_QUALITY = 20                  # -cq (nvenc) / -crf (libx264)
+CAND_AUDIO_BITRATE = "160k"

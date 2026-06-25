@@ -209,18 +209,26 @@ def scan_window(video, start: float, end: float, *, enabled: bool | None = None,
     rois = gconf.HUD_ROIS if rois is None else rois
     sample_fps = gconf.HUD_SAMPLE_FPS if sample_fps is None else sample_fps
     recognizer = recognizer or _default_recognizer
+    frame_iter = (frames if frames is not None
+                  else _sample_frames(video, start, end, sample_fps))
+    events: list[HudEvent] = []
+    # PER-FRAME guard (inner): a single corrupt frame / OCR decode error skips that
+    # frame and the scan keeps going. The OLD window-level try/except discarded EVERY
+    # event in the window — over a whole-VOD scan one bad frame zeroed all OCR.
+    # OUTER guard: a frame-sampling / decoder death stops the scan but keeps the events
+    # gathered so far (never propagates — HUD is a fail-safe booster).
     try:
-        frame_iter = (frames if frames is not None
-                      else _sample_frames(video, start, end, sample_fps))
-        events: list[HudEvent] = []
         for t, frame in frame_iter:
             for roi in rois.values():
-                kind = normalize_event(recognizer(roi_crop(frame, roi)))
+                try:
+                    kind = normalize_event(recognizer(roi_crop(frame, roi)))
+                except Exception:    # noqa: BLE001 — skip this frame/ROI, keep scanning
+                    continue
                 if kind:
                     events.append(HudEvent(kind, float(t)))
-        return events
-    except Exception:        # noqa: BLE001 — HUD is a fail-safe booster, never fatal
-        return []
+    except Exception:        # noqa: BLE001 — sampling/decoder error: keep what we have
+        pass
+    return events
 
 
 def scan_video(video, duration: float, *, sample_fps: float | None = None,

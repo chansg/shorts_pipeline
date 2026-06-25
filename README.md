@@ -452,6 +452,51 @@ loads it straight into the Gaming uploader.
 > GPU/long-run pass on real captures is yours; the unit tests cover the detection logic
 > on synthetic signals.
 
+### Candidate export (batch a folder → raw 60-90s trims, both audio tracks)
+
+`fullauto/candidates.py` is a **standalone batch stage**: point it at a folder of long
+OBS recordings and it writes the **top-5 raw highlight trims** per source for manual
+finishing — **no reframe, captions, or overlay** (those happen later in manual mode).
+Distinct from the 9:16 flow above; these are raw cuts that **preserve BOTH audio tracks**.
+
+```bash
+# default folder (config.CAND_INPUT_DIR) -> config.CAND_OUTPUT_DIR
+python -m fullauto.candidates
+# or explicit:
+python -m fullauto.candidates --input "C:\Users\chansg\Videos" --output "C:\Users\chansg\Documents\AshenChan\cand"
+# (a single file or a list of files also works in --input)
+```
+
+Per source `cand\<source_stem>\` gets the clips + a `candidates.json` manifest (rank,
+category, score, start/end/peak, voice-energy score, OCR events, output, why). Two signals:
+
+- **Voice energy (primary)** — the isolated voice track (`a:1`, `VOICE_TRACK_INDEX`) is
+  extracted to a temp 16k WAV and folded to the streamed vocal-band reaction curve
+  (`ENERGY_WINDOW_S`). Drives `banter` candidates. Single-track sources fall back to the
+  full mix (`a:0`) with a **WARNING** (noisier).
+- **HUD OCR (booster + tagging)** — the whole clip is sampled at `OCR_SAMPLE_FPS` (low on
+  purpose) inside the centre-banner `OCR_CROP`; recognised text is **fuzzy-matched**
+  (`OCR_FUZZY_THRESHOLD`) against `OCR_KEYWORDS` (Pentakill, Ace, …). A window with a kill
+  banner is tagged `play` and boosted (`WEIGHT_OCR` vs `WEIGHT_VOICE`).
+
+Selection takes the top `CANDIDATES_PER_SOURCE` **non-overlapping** interest peaks as
+60-90s windows (`CLIP_MIN_SECONDS`/`CLIP_MAX_SECONDS`) anchored on the peak, kept
+`MIN_GAP_SECONDS` apart so the picks spread across the VOD; fewer qualifying regions →
+export fewer and note it. Export re-encodes for a frame-accurate cut
+(`CAND_ENCODER`/`CAND_QUALITY` — NVENC default, swap to `libx264` for CPU CRF) and maps
+**`0:v:0 0:a:0 0:a:1`** so Track 2 survives for the downstream clean-voice transcription.
+
+> **Why both tracks matter:** if a candidate is exported with only one audio track the
+> caption step silently falls back to the mixed audio and reintroduces the dropout the
+> voice track fixes. Verify with
+> `ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 <clip>` —
+> it must list **two** audio streams.
+>
+> **Fail-safe throughout:** missing Track 2 → full mix + warning; Tesseract missing →
+> audio-only + warning; a single bad frame is skipped (the old whole-window try/except
+> zeroed all OCR — fixed: per-frame guard in `fullauto/hud.py`); no qualifying regions →
+> empty manifest with a note; one bad source → logged, the batch continues.
+
 ## Full-Auto Experiment (16:9 YouTube output — the older flow)
 
 The experimental long-form processor is its **own card on the landing screen**

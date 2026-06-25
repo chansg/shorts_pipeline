@@ -144,6 +144,24 @@ def test_scan_window_is_failsafe_when_recognizer_raises():
                            frames=_one_frame(), recognizer=boom) == []
 
 
+def test_scan_window_skips_bad_frame_keeps_the_rest():
+    # Regression: a SINGLE bad frame must not discard the whole window's events (the old
+    # window-level try/except zeroed everything — over a whole-VOD scan one corrupt frame
+    # killed all OCR). Frame 2 raises; frames 1 and 3 must still be detected.
+    arr = np.zeros((8, 8, 3), dtype=np.uint8)
+    calls = {"n": 0}
+
+    def flaky(crop):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("corrupt frame / OCR decode error")
+        return "PENTAKILL"
+
+    evs = hud.scan_window("x.mp4", 0.0, 4.0, enabled=True, rois={"banner": (0, 0, 1, 1)},
+                          frames=[(1.0, arr), (2.0, arr), (3.0, arr)], recognizer=flaky)
+    assert [(e.kind, e.t) for e in evs] == [("pentakill", 1.0), ("pentakill", 3.0)]
+
+
 def test_scan_window_is_failsafe_when_frame_source_raises():
     def bad_frames():
         raise OSError("ffmpeg/decoder missing")
