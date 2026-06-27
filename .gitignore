@@ -32,6 +32,7 @@ overlays/*
 !overlays/.gitkeep
 !overlays/like_subscribe_placeholder.png
 !overlays/like_subscribe_overlay.png
+!overlays/gamerchans_overlay.png
 
 # Scratch
 _aria_extract/

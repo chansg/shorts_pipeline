@@ -60,7 +60,7 @@ def test_composite_missing_asset_is_friendly(tmp_path, monkeypatch):
 
 def test_default_overlay_asset_present():
     # the branded banner ships in overlays/ and is the configured default
-    assert gconf.LIKE_SUB_OVERLAY == "like_subscribe_overlay.png"
+    assert gconf.LIKE_SUB_OVERLAY == "gamerchans_overlay.png"
     assert (gconf.OVERLAYS_DIR / gconf.LIKE_SUB_OVERLAY).exists()
     # captions sit above the banner band (no collision by default)
     assert gconf.CAPTION_POS_Y_FRAC < gconf.OVERLAY_POS_Y_FRAC

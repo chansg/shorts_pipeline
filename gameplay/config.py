@@ -235,7 +235,7 @@ ENERGY_MIN_GAP_S = 0.40     # merge peaks closer than this
 # centred horizontally at OVERLAY_POS_Y_FRAC (the banner's vertical CENTRE). It sits in
 # a low band that clears the caption band — captions were moved up to 0.72 (above) so
 # the two never collide. The placeholder remains in overlays/ but is no longer default.
-LIKE_SUB_OVERLAY = "like_subscribe_overlay.png"   # default branded banner in overlays/
+LIKE_SUB_OVERLAY = "gamerchans_overlay.png"       # default branded banner in overlays/
 OVERLAY_WIDTH_FRAC = 0.85         # banner width as a fraction of the 1080px frame (~918px -> ~288px tall)
 OVERLAY_POS_Y_FRAC = 0.84         # banner vertical CENTRE (0=top, 1=bottom); ~0.76-0.92 band
 OVERLAY_DEFAULT_POSITION = "bottom-center"
