@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 import queue
+import shutil
+import tempfile
 import threading
 from pathlib import Path
 
@@ -37,6 +39,27 @@ def _append_clips(picked, current):
 
 def _set_music(picked):
     return str(picked) if picked else ""
+
+
+def _servable_preview(path) -> str | None:
+    """gr.Video can only serve files under the CWD or the system temp dir. The montage
+    is written to the user's (possibly external) output folder, so if it's outside those
+    roots, copy it into temp for the preview — the real file stays where they chose."""
+    if not path:
+        return None
+    p = Path(path)
+    roots = [Path.cwd(), Path(tempfile.gettempdir())]
+    try:
+        if any(p.is_relative_to(r) for r in roots):
+            return str(p)
+    except Exception:        # noqa: BLE001 — is_relative_to edge cases -> fall through to copy
+        pass
+    try:
+        dest = Path(tempfile.gettempdir()) / p.name
+        shutil.copy2(p, dest)
+        return str(dest)
+    except Exception:        # noqa: BLE001 — preview is best-effort; the real file exists
+        return None
 
 
 def _open_folder(out_dir) -> str:
@@ -98,7 +121,10 @@ def _do_montage(clips_text, music, music_start, out_dir):
         yield "\n".join(log), gr.update(), gr.update(interactive=False)
 
     out = result.get("out")
-    yield ("\n".join(log), (str(out) if out else gr.update()),
+    preview = _servable_preview(out)
+    if out:
+        log.append(f"Saved: {out}")
+    yield ("\n".join(log), (preview if preview else gr.update()),
            gr.update(interactive=True))             # re-enable Run
 
 

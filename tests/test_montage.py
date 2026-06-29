@@ -182,6 +182,24 @@ def test_gui_handler_survives_build_error(tmp_path, monkeypatch):
     assert _interactive(frames[-1][2]) is True
 
 
+def test_servable_preview_copies_external_file(tmp_path, monkeypatch):
+    # a file outside CWD/temp must be copied into temp so gr.Video can serve it
+    import tempfile
+    fake_temp = tmp_path / "tmp"
+    fake_temp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_temp))
+    external = tmp_path / "AshenChan" / "montage.mp4"
+    external.parent.mkdir()
+    external.write_bytes(b"video")
+    served = mgui._servable_preview(str(external))
+    assert Path(served).parent == fake_temp and Path(served).read_bytes() == b"video"
+    # a file already under temp is served in place (no needless copy)
+    inside = fake_temp / "already.mp4"
+    inside.write_bytes(b"x")
+    assert mgui._servable_preview(str(inside)) == str(inside)
+    assert mgui._servable_preview(None) is None
+
+
 def test_gui_open_folder(tmp_path, monkeypatch):
     opened = {}
     monkeypatch.setattr(mgui.os, "startfile", lambda p: opened.setdefault("p", p),
