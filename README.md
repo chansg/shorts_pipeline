@@ -118,6 +118,48 @@ font system-wide.
 
 ---
 
+## Music Montage (Shorts flow — 🎬 tab)
+
+The **Shorts** view's first tab is the **Music Montage** builder (it replaces the old
+lore-video function as the quick Shorts flow). Feed it several gameplay clips + one
+royalty-free MP3 (YouTube Audio Library) and it produces a single vertical **9:16 Short**:
+the clips are stitched with light crossfades, the **game audio is denoised and ducked
+under the music**, and the **GamerChans overlay** is applied.
+
+It **reuses the gameplay pipeline's own components** — `gameplay.reframe` for the 9:16
+reframe and `gameplay.overlay.composite` for the branded banner — so there's one source
+of truth (an overlay/reframe change is not duplicated). Core: `gameplay/montage.py`
+(`build_montage`), GUI: `gameplay/montage_gui.py`.
+
+In the GUI: list the clips **in play order** (pick files to append, or paste paths;
+reorder/remove by editing the list), pick **one** MP3, set the **music start** (`mm:ss`
+or seconds — skip to the drop), and **Build montage**. It runs on a worker thread (the UI
+stays responsive), streams per-clip/stage progress, then offers **Open output folder**.
+Output lands in `MONTAGE_OUTPUT_DIR`.
+
+**Assembly** (three passes; near-lossless intermediates so only the overlay pass governs
+quality): (1) reframe each clip to 9:16; (2) one ffmpeg graph stitches video with
+`xfade` and the game-audio bed with `acrossfade`, then `afftdn` (denoise) +
+`volume` (duck to `MONTAGE_GAME_AUDIO_GAIN`, default 0.2) on that bed, music `afade`
+in/out, and `amix=inputs=2:normalize=0` (music dominant, no auto-attenuation); (3)
+`composite` lays the overlay = the final encode. The filter graph (n=3) is:
+
+```
+[0:v][1:v]xfade=fade:d=0.4:offset=… [vx1]; [vx1][2:v]xfade=…[vbody]; [vbody]fade(in/out)[v]
+[i:a:0]aresample,aformat[ga i]; [ga0][ga1]acrossfade=d=0.4 … [gbody]
+[gbody]afftdn=nr=12,volume=0.2[game]
+[3:a]…,afade=in,afade=out,volume[music]; [music][game]amix=inputs=2:normalize=0[a]
+```
+
+The music is seeked with `-ss <offset> -i music` so it starts where you asked. **Edges:**
+music shorter than the montage after the offset → it fades out cleanly with a logged
+**WARNING** (no loop unless `MONTAGE_LOOP_MUSIC`); a single clip → valid output (no
+transition); an offset past the track length → a clear error, no crash. Tunables:
+`MONTAGE_TRANSITION`/`_DURATION`, `MONTAGE_DENOISE`, `MONTAGE_MUSIC_GAIN`/`_FADEOUT`,
+`MONTAGE_FADE_ENDS`, `MONTAGE_LOOP_MUSIC` (all in `gameplay/config.py`).
+
+---
+
 ## Gameplay pipeline (second, parallel mode)
 
 A separate pipeline for **gameplay footage**, alongside the lore wizard — its own

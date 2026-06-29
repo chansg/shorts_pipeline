@@ -888,6 +888,10 @@ def build_app() -> gr.Blocks:
           banner = gr.Markdown(status_banner(""))
 
           with gr.Tabs():
+            # ------------------------------------------- Music Montage (new Shorts flow)
+            with gr.Tab("🎬 Music Montage"):
+                from gameplay.montage_gui import build_montage_tab
+                build_montage_tab()
             # ---------------------------------------------------- 1 Script
             with gr.Tab("1 · Script"):
                 with gr.Row():

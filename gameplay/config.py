@@ -412,3 +412,25 @@ OCR_FUZZY_THRESHOLD = 0.78         # 0..1 fuzzy-match ratio (Tesseract misreads 
 CAND_ENCODER = "h264_nvenc"        # "h264_nvenc" | "libx264"
 CAND_QUALITY = 20                  # -cq (nvenc) / -crf (libx264)
 CAND_AUDIO_BITRATE = "160k"
+
+# ============================================================================
+# Music-montage builder (gameplay.montage) — several gameplay MP4s + one MP3 ->
+# ONE 9:16 Short: clips reframed (reusing gameplay.reframe) and stitched with light
+# xfade crossfades; the game audio is denoised + ducked under a dominant music bed
+# (the user picks where in the song to start); the GamerChans overlay is applied
+# (reusing gameplay.overlay). Replaces the old lore-video builder as the Shorts flow.
+# ============================================================================
+MONTAGE_OUTPUT_DIR = GAMEPLAY_DIR / "montage"   # finished montage Shorts land here
+MONTAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MONTAGE_GAME_AUDIO_GAIN = 0.2      # game bed gain under the music (~20%)
+MONTAGE_DENOISE = 12               # afftdn noise-reduction (dB); 0 / None = denoise off
+                                   # (arnndn with an RNN model is a higher-quality upgrade,
+                                   #  but needs a model file — afftdn is the no-model default)
+MONTAGE_TRANSITION = "fade"        # xfade transition type (fade/dissolve/wipe...)
+MONTAGE_TRANSITION_DURATION = 0.4  # crossfade length between consecutive clips (s)
+MONTAGE_MUSIC_GAIN = 1.0           # music bed gain (the dominant track)
+MONTAGE_MUSIC_FADEIN = 0.5         # light music fade-in at the start (s)
+MONTAGE_MUSIC_FADEOUT = 1.5        # music fade-out at the end (s)
+MONTAGE_FADE_ENDS = True           # fade from/to black at the montage start/end
+MONTAGE_FADE_DURATION = 0.5        # length of the from/to-black fades (s)
+MONTAGE_LOOP_MUSIC = False         # loop the music if shorter than the montage (default: no)
