@@ -21,8 +21,9 @@ _MONTAGE_DONE = object()
 # ---- helpers ---------------------------------------------------------------
 
 def _clip_lines(text) -> list[str]:
-    """Ordered clip paths from the textbox (one per line; play order = top to bottom)."""
-    return [ln.strip().strip('"') for ln in (text or "").splitlines() if ln.strip()]
+    """Ordered clip paths from the textbox (one per line; play order = top to bottom).
+    Unquotes pasted 'Copy as path' values so surrounding quotes don't break the path."""
+    return [p for p in (montage_mod._unquote(ln) for ln in (text or "").splitlines()) if p]
 
 
 def _append_clips(picked, current):
@@ -61,7 +62,8 @@ def _do_montage(clips_text, music, music_start, out_dir):
     """Build the montage on a worker thread, streaming progress. Outputs:
     (log, result_video, run_button)."""
     clips = _clip_lines(clips_text)
-    out_dir = (out_dir or "").strip() or str(gconf.MONTAGE_OUTPUT_DIR)
+    music = montage_mod._unquote(music)
+    out_dir = montage_mod._unquote(out_dir) or str(gconf.MONTAGE_OUTPUT_DIR)
     if not clips:
         yield ("Add at least one gameplay clip (pick files or paste paths), then Run.",
                gr.update(), gr.update(interactive=True))

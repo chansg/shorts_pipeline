@@ -29,6 +29,24 @@ def test_parse_timecode():
 
 # ---- PURE: durations / offsets ---------------------------------------------
 
+def test_unquote_strips_copy_as_path_quotes():
+    assert m._unquote('"C:\\Users\\me\\Royalty [NCS Release].mp3"') == "C:\\Users\\me\\Royalty [NCS Release].mp3"
+    assert m._unquote("  'song.mp3'  ") == "song.mp3"
+    assert m._unquote("plain.mp3") == "plain.mp3"
+    assert m._unquote("") == ""
+
+
+def test_build_montage_accepts_quoted_paths(tmp_path, monkeypatch):
+    # regression: Windows 'Copy as path' wraps in quotes; both clips and music must work
+    clip = tmp_path / "Video Project 157.mp4"
+    clip.write_bytes(b"x")
+    music = tmp_path / "Royalty [NCS Release].mp3"
+    music.write_bytes(b"x")
+    _patch_ffmpeg(monkeypatch)
+    out = m.build_montage([f'"{clip}"'], f'"{music}"', "0:30", out_path=tmp_path / "o.mp4")
+    assert out.exists()
+
+
 def test_montage_duration_and_offsets():
     assert m.montage_duration([10, 10, 10], 0.4) == pytest.approx(29.2)
     assert m.montage_duration([10], 0.4) == 10

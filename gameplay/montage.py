@@ -38,6 +38,16 @@ _MUSIC_SR = 48000
 
 # ---- PURE: timecode + durations --------------------------------------------
 
+def _unquote(value) -> str:
+    """Normalise a pasted path: strip whitespace and a single layer of surrounding quotes.
+    Windows 'Copy as path' wraps the path in double quotes, which would otherwise become
+    literal characters in the path and make it 'not found'."""
+    s = str(value if value is not None else "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        s = s[1:-1].strip()
+    return s
+
+
 def parse_timecode(value) -> float:
     """Parse a music start offset: 'mm:ss', 'h:mm:ss', or plain seconds -> float seconds.
     Raises FriendlyError on junk. (Range checks are the caller's — it knows the track len.)"""
@@ -171,15 +181,18 @@ def build_montage(clip_paths, music_path, music_start, *, out_path=None,
     emit = progress or (lambda m: None)
     ensure_ffmpeg()
 
-    clips = [Path(str(c).strip()) for c in (clip_paths or []) if str(c).strip()]
+    clips = [Path(p) for p in (_unquote(c) for c in (clip_paths or [])) if p]
     if not clips:
         raise FriendlyError("Add at least one gameplay clip to the montage.")
     for c in clips:
         if not c.exists():
             raise FriendlyError(f"Clip not found: {c}")
-    music = Path(str(music_path).strip()) if music_path else None
-    if not music or not music.exists():
+    music_str = _unquote(music_path)
+    music = Path(music_str) if music_str else None
+    if not music:
         raise FriendlyError("Pick a music file (one MP3) for the montage.")
+    if not music.exists():
+        raise FriendlyError(f"Music file not found: {music}")
 
     music_dur = float(_probe_duration(music) or 0.0)
     if music_dur <= 0:
