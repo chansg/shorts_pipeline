@@ -1,7 +1,7 @@
 # Ashen_Chan Shorts Pipeline
 
-A desktop tool for making vertical **9:16 YouTube Shorts**. It does three different
-jobs, all from one window:
+A desktop tool for making vertical **9:16 YouTube Shorts** for the **GamerChans**
+channel. It does three different jobs, all from one window:
 
 1. **Music montage** — drop in a few gameplay clips + one music track → one Short.
 2. **Lore narration** — turn a written script into a fully AI-generated narrated Short.
@@ -55,8 +55,8 @@ It opens a **landing screen** with cards for each mode: **Shorts**, **Gameplay**
 
 Pick several gameplay clips + one royalty-free MP3 (e.g. from YouTube's Audio Library)
 and it builds a single 9:16 Short: the clips are reframed and joined with smooth
-crossfades, the game audio is cleaned up and turned down **under** the music, and a
-branded overlay is added. You set where in the song to start (skip to the drop), hit
+crossfades, the game audio is cleaned up and turned down **under** the music, and the
+**GamerChans** like/subscribe overlay is added. You set where in the song to start (skip to the drop), hit
 **Build montage**, and watch the progress — the finished file is saved to your chosen
 output folder.
 
