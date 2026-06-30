@@ -91,11 +91,14 @@ def render_editor(rows, spk_rows=None) -> str:
         '<div class="txe-wrap">'
         + _STYLE
         + '<div class="txe-help">'
-        '<b>↑/↓</b> or <b>Enter</b> move · type to fix the word · click a '
-        '<b>speaker button</b> (or <b>Alt+1…N</b>) to set the active row / a '
-        'shift-selected range · <b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete '
-        'row · click a row chip to select · click 🔇 to censor. '
-        '<span id="txe-selinfo"></span></div>'
+        '<b>↑/↓</b> move · <b>Enter</b> next row (add one at the end) · type to fix the '
+        'word · the two number fields are <b>start/end</b> seconds; <b>⏱</b> snaps a '
+        "row's start to the video's current playhead · <b>▲/▼</b> (or <b>Alt+↑/↓</b>) "
+        'reorder · <b>✕</b> (or <b>Alt+D</b>) delete · <b>speaker button</b> / '
+        '<b>Alt+1…N</b> set speaker (active row / shift-selected range) · <b>Alt+B</b> '
+        'speaker to all below · 🔇 censor. '
+        '<button type="button" class="txe-add" title="Add a row (Alt+Enter)">＋ Add '
+        'row</button> <span id="txe-selinfo"></span></div>'
         f'<div class="txe-legend">{buttons}</div>'
         f'<div id="{ROOT_ELEM_ID}" data-rows="{data}" data-speakers="{spk}"></div>'
         '</div>'
@@ -125,6 +128,9 @@ _STYLE = """<style>
 .txe-spk:hover{border-color:#7d88ff;background:#1c2230;}
 .txe-spk:active{transform:translateY(1px);}
 .txe-spk b{width:12px;height:12px;border-radius:3px;background:var(--c);display:inline-block;}
+.txe-add{cursor:pointer;font:inherit;font-size:12px;color:#e6edf3;background:#21304a;
+  border:1px solid #3b5b8c;border-radius:6px;padding:2px 9px;margin-left:4px;}
+.txe-add:hover{background:#2a3d5e;border-color:#7d88ff;}
 #tx-root .tx-row{display:flex;align-items:center;gap:6px;padding:1px 2px;border-radius:4px;}
 #tx-root .tx-row.active{background:rgba(120,120,255,.18);}
 #tx-root .tx-row.sel{background:rgba(120,120,255,.30);}
@@ -133,10 +139,19 @@ _STYLE = """<style>
 #tx-root .tx-text{flex:1 1 auto;background:#0d1117;color:#e6edf3;border:1px solid #30363d;
   border-radius:4px;padding:3px 6px;font:inherit;}
 #tx-root .tx-row.active .tx-text{border-color:#7d88ff;}
-#tx-root .tx-spk{flex:0 0 auto;width:120px;font-size:11px;opacity:.7;overflow:hidden;
+#tx-root .tx-spk{flex:0 0 auto;width:92px;font-size:11px;opacity:.7;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;}
 #tx-root .tx-cz{flex:0 0 auto;width:20px;text-align:center;cursor:pointer;opacity:.45;}
 #tx-root .tx-cz.on{opacity:1;}
+#tx-root .tx-time{flex:0 0 auto;width:52px;background:#0d1117;color:#9aa7b4;
+  border:1px solid #30363d;border-radius:4px;padding:3px 4px;font:inherit;font-size:11px;
+  text-align:right;}
+#tx-root .tx-time:focus{color:#e6edf3;border-color:#7d88ff;}
+#tx-root .tx-ico{flex:0 0 auto;cursor:pointer;opacity:.5;border:none;background:none;
+  color:#e6edf3;font:inherit;font-size:13px;padding:0 3px;line-height:1;}
+#tx-root .tx-ico:hover{opacity:1;}
+#tx-root .tx-del:hover{color:#ff6b6b;}
+#tx-root .tx-now:hover{color:#7d88ff;}
 </style>"""
 
 
@@ -184,16 +199,68 @@ SETUP_JS = r"""
         setSpeaker(root,t,idx); root.__sel.clear(); updateSel(root);
       };
     });
+    const add=wrap.querySelector('.txe-add');
+    if(add){ add.onmousedown=(e)=>e.preventDefault(); add.onclick=()=>addRow(root, root.__active); }
+  }
+  function addRow(root,after){
+    // insert a blank row after index `after` (null/last -> append). Inherit the previous
+    // row's speaker; time it right after that row (start = prev.end, +0.5s) so a word the
+    // ASR dropped lands in sequence. Focus it so the user types immediately.
+    const n=root.__rows.length;
+    let idx=(after==null||after<0||after>=n)?n:after+1;
+    const prev=root.__rows[idx-1]||root.__rows[n-1];
+    const start=prev?(num(prev[3])||num(prev[2])||0):0;
+    const nr=['', prev?prev[1]:'', start, r2(start+0.5), false];
+    root.__rows.splice(idx,0,nr);
+    render(root); commit(root); focusRow(root, root.__rows.indexOf(nr));
   }
   function onKey(root,e,i){
-    if(e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; commit(root); if(i+1<root.__rows.length) focusRow(root,i+1); }
-    else if(e.key==='ArrowDown' && !e.shiftKey){ e.preventDefault(); if(i+1<root.__rows.length) focusRow(root,i+1); }
-    else if(e.key==='ArrowUp' && !e.shiftKey){ e.preventDefault(); if(i>0) focusRow(root,i-1); }
+    if(e.altKey && e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; addRow(root,i); }
+    else if(e.key==='Enter'){ e.preventDefault(); root.__rows[i][0]=e.target.value; commit(root); if(i+1<root.__rows.length) focusRow(root,i+1); else addRow(root,i); }
+    else if(e.altKey && e.key==='ArrowUp'){ e.preventDefault(); root.__rows[i][0]=e.target.value; moveRow(root,i,-1); }
+    else if(e.altKey && e.key==='ArrowDown'){ e.preventDefault(); root.__rows[i][0]=e.target.value; moveRow(root,i,1); }
+    else if(e.key==='ArrowDown' && !e.shiftKey && !e.altKey){ e.preventDefault(); if(i+1<root.__rows.length) focusRow(root,i+1); }
+    else if(e.key==='ArrowUp' && !e.shiftKey && !e.altKey){ e.preventDefault(); if(i>0) focusRow(root,i-1); }
     else if(e.altKey && e.key>='1' && e.key<='9'){ e.preventDefault(); const t=root.__sel.size?[...root.__sel]:[i]; setSpeaker(root,t,(+e.key)-1); root.__sel.clear(); }
     else if(e.altKey && (e.key==='b'||e.key==='B')){ e.preventDefault(); const s=root.__rows[i][1]; for(let k=i;k<root.__rows.length;k++) root.__rows[k][1]=s; render(root); commit(root); focusRow(root,i); }
     else if(e.altKey && (e.key==='d'||e.key==='D')){ e.preventDefault(); root.__rows.splice(i,1); render(root); commit(root); focusRow(root,Math.min(i,root.__rows.length-1)); }
   }
+  function num(v){ const n=Number(v); return isFinite(n)?n:0; }
+  function r2(n){ return Math.round(n*100)/100; }
+  function sortRows(root){ root.__rows.sort((a,b)=> num(a[2])-num(b[2])); }
+  function moveRow(root,i,dir){
+    const j=i+dir; if(j<0||j>=root.__rows.length) return;
+    const a=root.__rows[i], b=root.__rows[j];
+    const as=a[2], ae=a[3]; a[2]=b[2]; a[3]=b[3]; b[2]=as; b[3]=ae;  // swap time slots
+    const moved=a; sortRows(root); render(root); commit(root);
+    focusRow(root, root.__rows.indexOf(moved));
+  }
+  function delRow(root,i){ root.__rows.splice(i,1); render(root); commit(root);
+    if(root.__rows.length) focusRow(root, Math.min(i, root.__rows.length-1)); }
+  function playhead(){ const v=document.querySelector('#mode-gaming video')||document.querySelector('video'); return (v&&isFinite(v.currentTime))?v.currentTime:null; }
+  function setToPlayhead(root,i){
+    const t=playhead(); if(t==null) return;
+    const dur=Math.max(0.1, num(root.__rows[i][3])-num(root.__rows[i][2]));
+    root.__rows[i][2]=r2(t); root.__rows[i][3]=r2(t+dur);
+    const moved=root.__rows[i]; sortRows(root); render(root); commit(root);
+    focusRow(root, root.__rows.indexOf(moved));
+  }
+  function timeField(root,i,which,r){
+    const el=document.createElement('input'); el.className='tx-time'; el.type='text';
+    el.value=num(r[which]); el.title=(which===2?'start':'end')+' (s)';
+    el.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); el.blur(); } e.stopPropagation(); });
+    el.addEventListener('blur',()=>{
+      root.__rows[i][which]=r2(num(el.value));
+      const moved=root.__rows[i]; sortRows(root); render(root); commit(root);
+      const ni=root.__rows.indexOf(moved); if(ni>=0) setActive(root,ni);
+    });
+    return el;
+  }
+  function ico(cls,txt,title,fn){ const b=document.createElement('button'); b.type='button';
+    b.className='tx-ico '+cls; b.textContent=txt; b.title=title;
+    b.onmousedown=(e)=>e.preventDefault(); b.onclick=fn; return b; }
   function render(root){
+    sortRows(root);
     let list=root.querySelector('.tx-list');
     if(!list){ list=document.createElement('div'); list.className='tx-list'; root.appendChild(list); }
     list.innerHTML='';
@@ -208,10 +275,15 @@ SETUP_JS = r"""
       inp.addEventListener('input',()=>{ root.__rows[i][0]=inp.value; });
       inp.addEventListener('blur',()=>{ root.__rows[i][0]=inp.value; commit(root); });
       inp.addEventListener('focus',()=>setActive(root,i));
-      const sp=document.createElement('span'); sp.className='tx-spk'; sp.textContent=spk;
+      const st=timeField(root,i,2,r), en=timeField(root,i,3,r);
+      const now=ico('tx-now','⏱','set start to the video playhead',()=>setToPlayhead(root,i));
+      const up=ico('tx-mv','▲','move earlier (Alt+↑)',()=>moveRow(root,i,-1));
+      const dn=ico('tx-mv','▼','move later (Alt+↓)',()=>moveRow(root,i,1));
       const cz=document.createElement('span'); cz.className='tx-cz'+(r[4]?' on':''); cz.textContent=r[4]?'🔇':'·'; cz.title='censor (click)';
       cz.onclick=()=>{ root.__rows[i][4]=!root.__rows[i][4]; cz.className='tx-cz'+(root.__rows[i][4]?' on':''); cz.textContent=root.__rows[i][4]?'🔇':'·'; commit(root); };
-      row.append(chip,inp,sp,cz); list.appendChild(row);
+      const del=ico('tx-del','✕','delete row (Alt+D)',()=>delRow(root,i));
+      const sp=document.createElement('span'); sp.className='tx-spk'; sp.textContent=spk;
+      row.append(chip,inp,st,en,now,up,dn,cz,sp,del); list.appendChild(row);
     });
     updateSel(root);
   }

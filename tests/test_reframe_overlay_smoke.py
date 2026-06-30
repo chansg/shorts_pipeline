@@ -49,6 +49,24 @@ def test_reframe_to_9x16(synthetic_clip, tmp_path):
     assert _dims(out) == (gconf.WIDTH, gconf.HEIGHT)
 
 
+def test_tall_reframe_filter_full_width_band_no_stretch():
+    g = reframe_mod.reframe_filter("tall", 1080, 1920, tall_frac=0.8, blur=24, fps=30)
+    # uniform cover-crop (force_original_aspect_ratio=increase) -> never an anamorphic
+    # stretch; a full-width band shorter than the frame, over a blurred fill.
+    assert "force_original_aspect_ratio=increase" in g and "boxblur" in g
+    assert "overlay=" in g
+    bh = (int(round(1920 * 0.8)) // 2) * 2
+    assert f"crop=1080:{bh}:" in g and bh < 1920          # tall band + thin blur frame
+    # a stretch would be `scale=1080:1920` WITHOUT force_original_aspect_ratio
+    assert "scale=1080:1920," not in g.replace(
+        "scale=1080:1920:force_original_aspect_ratio=increase", "")
+
+
+def test_tall_reframe_renders_9x16(synthetic_clip, tmp_path):
+    out = reframe_mod.reframe(synthetic_clip, tmp_path / "tall.mp4", mode="tall")
+    assert _dims(out) == (gconf.WIDTH, gconf.HEIGHT)
+
+
 def test_effects_filter_builds_and_renders(synthetic_clip, tmp_path):
     reframed = reframe_mod.reframe(synthetic_clip, tmp_path / "reframed.mp4")
     # explicit beats so the test doesn't depend on the energy detector's findings

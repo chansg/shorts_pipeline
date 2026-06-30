@@ -68,6 +68,38 @@ def test_speaker_colours_grid_order_stable():
     assert list(colors)[-1] == "Ghost"                       # extra speaker appended
 
 
+def test_render_has_add_row_affordance():
+    out = ed.render_editor([["hi", "S0", 0, 0.4, False]])
+    assert 'class="txe-add"' in out                  # visible "+ Add row" button
+    assert "Alt+Enter" in out                          # the hotkey is documented
+    assert "addRow" in ed.SETUP_JS                      # controller can insert rows
+    # a committed added row (blank timing inferred client-side, or 0/0) still builds:
+    # Transcript.from_rows keeps a text row and infers timing, so the word isn't lost.
+    from gameplay.transcript import Transcript
+    rows = ed.parse_bridge('[["off?","S0",13.0,13.4,false],["last","S0",13.4,13.9,false]]')
+    t = Transcript.from_rows(rows)
+    assert [w.text for w in t.words] == ["off?", "last"] and t.words[1].start == 13.4
+
+
+def test_editor_exposes_time_reorder_delete_controls():
+    out = ed.render_editor([["a", "S0", 1.0, 1.5, False], ["b", "S0", 1.5, 2.0, False]])
+    assert "start/end" in out                          # help documents the time fields
+    assert "tx-time" in ed.SETUP_JS                     # editable start/end inputs
+    for fn in ("moveRow", "delRow", "setToPlayhead", "sortRows", "timeField"):
+        assert fn in ed.SETUP_JS                        # controller has all the ops
+    assert "#mode-gaming video" in ed.SETUP_JS          # ⏱ reads the clip-video playhead
+
+
+def test_retime_reorders_at_build():
+    # giving 'world' an earlier start than 'hello' reorders the captions (the build sorts
+    # by start) — this is how the editor's time fields / move buttons reorder.
+    from gameplay.transcript import Transcript
+    rows = ed.parse_bridge('[["hello","S0",1.5,2.0,false],["world","S0",1.0,1.5,false]]')
+    t = Transcript.from_rows(rows)
+    assert [w.text for w in t.words] == ["world", "hello"]
+    assert t.words[0].start == 1.0
+
+
 def test_render_has_clickable_speaker_buttons():
     spk = [["SPEAKER_00", "#ff0000"], ["SPEAKER_01", "#00ff00"]]
     out = ed.render_editor([["hi", "SPEAKER_00", 0, 0.4, False]], spk)

@@ -196,7 +196,13 @@ effects, and a like/subscribe overlay. The lore pipeline is untouched by it.
    bottleneck, so the editor (`gameplay/editor.py`) is built for speed, *not* a
    spreadsheet. *These rows are the captions.*
    - **↑/↓** or **Enter** walk the rows; type to fix a word in the whole-row field — no
-     double-click-per-cell.
+     double-click-per-cell. **Enter on the last row** (or **Alt+Enter**, or the **＋ Add
+     row** button) inserts a row — timed right after the previous word — so you can add
+     words the ASR dropped.
+   - Each row has editable **start/end** second fields, a **⏱** button that snaps the
+     row's start to the **video's current playhead** (scrub the clip, click ⏱ to sync a
+     caption), **▲/▼** (or **Alt+↑/↓**) to **reorder**, and **✕** (or **Alt+D**) to
+     delete. Rows always display in time order (editing a time re-sorts it into place).
    - A row of coloured **speaker buttons** (5 by default — `DEFAULT_SPEAKER_ROWS`) sets
      the active row's speaker (or a **shift-selected range** — click a row chip,
      shift-click another) in ONE click; **Alt+1…N** are the keyboard equivalents.
@@ -264,9 +270,36 @@ your GPU, token, and accepted licence).
 > Starlette print a `StarletteDeprecationWarning` on *every* request; it's noise, not a
 > failed request or a loop. `app.py` silences just that message.
 
+### Clean-voice transcription (OBS multi-track) — the upstream fix
+
+The cleanest way to fix caption dropout is to never mix game audio into the
+transcription input. Configure OBS to record **two audio tracks** into one MP4:
+
+- **Track 1 (`a:0`)** = full mix (game + mic + Discord) — the **viewer audio**.
+- **Track 2 (`a:1`)** = voice only (mic + Discord, no game audio).
+
+When an uploaded recording has **≥ 2 audio tracks**, the pipeline transcribes **Track 2**
+so WhisperX/VAD/diarization see clean speech (no SFX/music to bury or hallucinate over).
+The extraction happens at **import** (`gameplay/transcribe.py:_extract_voice_track`), from
+the original recording, into a cached `_voice16k.wav` — *before* normalisation, which keeps
+only the mixed track. **The viewer-facing audio and the final mux are untouched** — only
+the transcription input changes. Single-track (old) recordings still process: they fall
+back to the mixed track `a:0` with a **WARNING** in the transcribe log. Knobs in
+`gameplay/config.py`: `TRANSCRIBE_VOICE_TRACK` (default on), `VOICE_TRACK_INDEX` (`1` = a:1),
+`KEEP_PREP_AUDIO` (keep the work wav for debugging).
+
+Diarization labels (`SPEAKER_00`, …) are **not stable across recordings**, so identity
+assignment stays manual. After a diarized run the pipeline writes a `speakers.json` sidecar
+next to the transcript listing each label + a sample line (and logs the same), so you can
+eyeball which label is you. Map a label → caption colour per batch with
+`SPEAKER_STYLE_MAP` (label → hex; unmapped labels use the auto palette), and the editor's
+colour grid overrides it per clip. *Upgrade path (not built): putting your mic on its own
+track and Discord on another removes the guessing entirely — Track 2 is definitively you.*
+
 ### Noisy game audio (transcript quality)
 
-Loud game audio over voice chat used to break the transcript two ways: a **massive
+These knobs still apply to single-track recordings (no separate voice track). Loud game
+audio over voice chat used to break the transcript two ways: a **massive
 dropout** (whole speech regions missing) and a **repetition collapse** (one "word"
 of hundreds of repeated letters, e.g. `Naaaaaa…`). Both are handled in
 `gameplay/transcribe.py` + `gameplay/config.py`:
@@ -324,18 +357,24 @@ Built Shorts are encoded for phone sharpness via one shared helper
   near-lossless reframe at `INTERMEDIATE_CRF` 14 + one final encode; +1 only if a
   like/subscribe overlay is used), down from up to four. Effects + captions are
   composed into a single pass. The build log reports the pass count.
-- **Layout modes** (`REFRAME_MODE`, also a GUI dropdown) reclaim the bitrate the
-  blur-pad spends on blurred bars:
-  - `fill` *(default, recommended)* — cover + crop so the gameplay fills the whole
-    1080×1920 at full resolution (**sharpest**, no wasted blur). Loses the far
-    horizontal edges; bias the crop with `REFRAME_CROP_X_OFFSET` (0=left, 0.5=centre,
-    1=right) — e.g. nudge to keep the ARAM minimap. `REFRAME_CROP_Y_OFFSET` and
-    `REFRAME_FILL_FRACTION` (zoom past cover) tune it; all three are GUI sliders.
+- **Layout modes** (`REFRAME_MODE`, also a GUI dropdown). 16:9 → 9:16 with **no stretch**
+  is a trade-off: you crop the sides (more zoom) or blur-pad (waste vertical). The modes
+  sit on that spectrum:
+  - `tall` *(default, recommended for ARAM)* — a **full-width gameplay band** scaled
+    **uniformly (no stretch)** to fill `REFRAME_TALL_HEIGHT_FRAC` (**0.82**) of the
+    height, over a thin blurred frame top/bottom. Uses **far more vertical space than
+    blur-pad** while keeping **more horizontal context than full-crop fill** — so ARAM's
+    wide, busy top-down action reads big and clear without being cropped to the centre.
+    Higher `REFRAME_TALL_HEIGHT_FRAC` = more vertical / more side-crop; lower = more width
+    / thicker frame. `REFRAME_CROP_X_OFFSET`/`_Y_OFFSET` bias the band's crop.
+  - `fill` — cover + crop so the gameplay fills the **whole** frame (**sharpest**, no
+    blur) but zooms ~1.8× and keeps only the centre ~⅓ of the width; bias with
+    `REFRAME_CROP_X_OFFSET` and `REFRAME_FILL_FRACTION` (GUI sliders).
   - `fit_crop` — `fill` at fraction 1.0, centred.
-  - `blur_pad` — full frame centred over a blurred fill (no crop; the old default).
+  - `blur_pad` — full frame centred over a blurred fill (no crop; most pixels are blur).
   - `zoom_blur` — blur-pad with the gameplay band enlarged by `ZOOM_BLUR_SCALE`.
 
-  With `fill`, captions default to `CAPTION_POS_Y_FRAC` 0.72 — a readable lower band
+  Captions default to `CAPTION_POS_Y_FRAC` 0.72 — a readable lower band
   that sits **above** the centred (~0.84) like/subscribe overlay, so caption and banner
   never fight the game's centre HUD or each other. It's a GUI slider per build.
 

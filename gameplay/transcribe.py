@@ -17,6 +17,7 @@ without the heavy deps — v1 broke precisely on such an API move
 """
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -35,6 +36,9 @@ Progress = Callable[[str], None]
 # NOT match the `source.*` glob in state.GameplayClip.source_path, or reframe/build
 # would treat it as the source video. Leading underscore => sorts/reads as a work file.
 PREP_AUDIO_NAME = "_audio16k.wav"
+# Cached clean 16k-mono VOICE track (OBS Track 2 / a:1), extracted at import when the
+# recording has >=2 audio tracks. Same leading-underscore rule as PREP_AUDIO_NAME.
+VOICE_AUDIO_NAME = "_voice16k.wav"
 
 
 # ---- ingest -----------------------------------------------------------------
@@ -109,7 +113,13 @@ def _audio_filter_chain() -> str:
     return ",".join(parts)
 
 
-def prepare_audio(src: str | Path, dest: str | Path) -> Path:
+def count_audio_tracks(src: str | Path) -> int:
+    """Number of audio streams in `src` (OBS multi-track recordings have >=2)."""
+    return sum(1 for s in _probe_streams(Path(src))
+               if s.get("codec_type") == "audio")
+
+
+def prepare_audio(src: str | Path, dest: str | Path, track: int | None = None) -> Path:
     """Produce a clean 16k MONO wav for WhisperX.
 
     whisperx.load_audio already downmixes to 16k mono but applies NO filtering. On
@@ -117,10 +127,17 @@ def prepare_audio(src: str | Path, dest: str | Path) -> Path:
     misses speech (dropout) and ASR collapses. This adds an explicit stereo->mono
     downmix plus a high-pass + loudness-normalise so the voice survives. Feed the
     result to whisperx.load_audio (a no-op resample) so VAD/ASR/diarization all see
-    the cleaned audio."""
+    the cleaned audio.
+
+    `track` (0-based audio stream index) selects WHICH audio to extract — used to grab
+    the isolated voice track (a:1) from an OBS multi-track recording. None = ffmpeg's
+    default stream selection (the mixed track a:0), i.e. today's behaviour."""
     from modules.assemble import _run
     src, dest = Path(src), Path(dest)
-    cmd = ["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000"]
+    cmd = ["ffmpeg", "-y", "-i", str(src), "-vn"]
+    if track is not None:
+        cmd += ["-map", f"0:a:{int(track)}?"]      # ? = optional, never hard-fail
+    cmd += ["-ac", "1", "-ar", "16000"]
     chain = _audio_filter_chain()
     if chain:
         cmd += ["-af", chain]
@@ -163,17 +180,27 @@ def playable_preview(path):
             return str(p)
         out = Path(tempfile.mkdtemp(prefix="gp_fast_")) / p.name
         from modules.assemble import _run
-        _run(["ffmpeg", "-y", "-i", str(p), "-c", "copy", "-movflags", "+faststart",
-              str(out)])
+        # -map 0:v?/0:a? keeps ALL audio streams (default selection would drop the OBS
+        # voice track a:1, which transcription needs); -dn drops data/timecode tracks.
+        _run(["ffmpeg", "-y", "-i", str(p), "-map", "0:v?", "-map", "0:a?", "-dn",
+              "-c", "copy", "-movflags", "+faststart", str(out)])
         return str(out)
     except Exception:        # noqa: BLE001 — a remux hiccup must never block the upload
         return str(path)
 
 
-def import_source(src: str | Path, name: str | None = None) -> GameplayClip:
+def import_source(src: str | Path, name: str | None = None,
+                  progress: Progress | None = None) -> GameplayClip:
     """Copy/normalise an uploaded clip into its work dir under
     output/gameplay/<name>/ and return the GameplayClip. Normalises (CFR + strip
-    non-A/V) only when needed; otherwise a plain copy. Idempotent."""
+    non-A/V) only when needed; otherwise a plain copy. Idempotent.
+
+    Also extracts the isolated VOICE track for transcription when the recording has
+    >=2 audio tracks (OBS Track 2 = mic+Discord, no game audio). This is done HERE,
+    from the ORIGINAL `src`, because normalize_source keeps only the mixed track a:0
+    (the viewer audio) — so the clean voice would otherwise be gone by transcribe time.
+    The cached `_voice16k.wav` is what transcribe_clip feeds WhisperX. The viewer/build
+    audio path is untouched."""
     src = Path(src)
     clip = GameplayClip(name or src.stem)
     if not clip.has_source():
@@ -181,7 +208,41 @@ def import_source(src: str | Path, name: str | None = None) -> GameplayClip:
             normalize_source(src, clip.dir / "source.mp4")
         else:
             shutil.copy2(src, clip.dir / f"source{src.suffix.lower()}")
+    _extract_voice_track(src, clip, progress)
     return clip
+
+
+def _extract_voice_track(src: str | Path, clip: GameplayClip,
+                         progress: Progress | None = None) -> Path | None:
+    """Extract the clean voice track (OBS Track 2 / a:1) to clip.dir/VOICE_AUDIO_NAME
+    when the source has >=2 audio tracks. Returns the wav path, or None to signal the
+    transcription should fall back to the mixed track. FAIL-SAFE: any probe/extract
+    error logs a warning and falls back (never crashes the run). Single-track sources
+    log a clear WARNING that the recording wasn't made with the separate-track setup."""
+    voice = clip.dir / VOICE_AUDIO_NAME
+    voice.unlink(missing_ok=True)                # never reuse a stale extraction
+    if not gconf.TRANSCRIBE_VOICE_TRACK:
+        return None
+    try:
+        n = count_audio_tracks(src)
+    except Exception:                            # noqa: BLE001 — probe must not crash
+        n = 0
+    if n < 2:
+        _emit(progress, "⚠ Single audio track — this recording wasn't made with the "
+                        "separate-voice OBS setup; transcribing the MIXED audio "
+                        "(game SFX over speech may lower caption quality).")
+        return None
+    try:
+        prepare_audio(src, voice, track=gconf.VOICE_TRACK_INDEX)
+        _emit(progress, f"Voice track: {n} audio tracks found — transcribing the "
+                        f"ISOLATED voice (OBS Track {int(gconf.VOICE_TRACK_INDEX) + 1}), "
+                        f"not the game mix.")
+        return voice
+    except Exception as e:                        # noqa: BLE001 — fall back, don't crash
+        voice.unlink(missing_ok=True)
+        _emit(progress, f"⚠ Voice-track extraction failed ({type(e).__name__}); "
+                        f"falling back to the mixed audio.")
+        return None
 
 
 # ---- diarization (self-contained, version-robust, testable) -----------------
@@ -365,13 +426,18 @@ def _load_model(whisperx, plan, asr_options: dict, vad_options: dict):
 
 def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
                diarize: bool = True, batch_size: int | None = None,
-               num_speakers: int | None = None) -> Transcript:
+               num_speakers: int | None = None,
+               voice_audio: str | Path | None = None) -> Transcript:
     """Transcribe + word-align + optionally diarize `audio_or_video`.
 
     Long-video safe on a 10GB card: the ASR model's VRAM is released before the
     alignment model loads, and again before diarization, so the card never holds
     two models at once. `batch_size` overrides the default (full-auto passes a
     smaller one); a CUDA OOM retries once at a smaller batch.
+
+    `voice_audio`, if given and present, is an already-cleaned 16k-mono wav of the
+    isolated voice track (OBS Track 2, extracted at import) — it is fed to WhisperX
+    directly instead of the mixed track, so ASR/VAD/diarization see clean speech.
 
     Returns a Transcript. Falls back to single-speaker when there's no HF token,
     pyannote finds <=1 voice, or diarization errors. Raises FriendlyError for the
@@ -410,17 +476,25 @@ def transcribe(audio_or_video: str | Path, progress: Progress | None = None,
         model = _load_model(whisperx, plan, asr_options, vad_options)
         # Clean 16k-mono prep (downmix + high-pass + loudnorm) so VAD finds the
         # speech and ASR has SNR — then load_audio (a no-op resample) for the model.
-        src_sr, src_ch = probe_audio(path)
-        # Write next to the source under a FIXED name (PREP_AUDIO_NAME) that can't
-        # match the clip's `source.*` glob (state.GameplayClip.source_path) —
-        # otherwise the prepped wav is picked up as the "source" by reframe/build and
-        # re-prepped each run (source.16k.16k.wav…). Overwritten each run; no accumulation.
-        prepped = prepare_audio(path, Path(path).parent / PREP_AUDIO_NAME)
-        out_sr, out_ch = probe_audio(prepped)
-        _emit(progress, f"Audio: source {src_sr or '?'}Hz/{src_ch or '?'}ch → "
-                        f"{out_sr or 16000}Hz/{'mono' if out_ch == 1 else f'{out_ch}ch'} "
-                        f"(high-pass {gconf.WHISPERX_AUDIO_HIGHPASS_HZ}Hz, "
-                        f"loudnorm {'on' if gconf.WHISPERX_AUDIO_LOUDNORM else 'off'}).")
+        voice = Path(voice_audio) if voice_audio else None
+        if voice and voice.exists():
+            # Pre-extracted isolated voice track (import step) — already cleaned; use as-is.
+            prepped = voice
+            src_sr, src_ch = probe_audio(prepped)
+            _emit(progress, "Audio: transcribing the ISOLATED voice track "
+                            "(clean speech, no game audio).")
+        else:
+            src_sr, src_ch = probe_audio(path)
+            # Write next to the source under a FIXED name (PREP_AUDIO_NAME) that can't
+            # match the clip's `source.*` glob (state.GameplayClip.source_path) —
+            # otherwise the prepped wav is picked up as the "source" by reframe/build and
+            # re-prepped each run (source.16k.16k.wav…). Overwritten each run; no accumulation.
+            prepped = prepare_audio(path, Path(path).parent / PREP_AUDIO_NAME)
+            out_sr, out_ch = probe_audio(prepped)
+            _emit(progress, f"Audio: source {src_sr or '?'}Hz/{src_ch or '?'}ch → "
+                            f"{out_sr or 16000}Hz/{'mono' if out_ch == 1 else f'{out_ch}ch'} "
+                            f"(high-pass {gconf.WHISPERX_AUDIO_HIGHPASS_HZ}Hz, "
+                            f"loudnorm {'on' if gconf.WHISPERX_AUDIO_LOUDNORM else 'off'}).")
         _emit(progress, f"VAD: {gconf.WHISPERX_VAD_METHOD} on "
                         f"(onset={gconf.WHISPERX_VAD_ONSET}, offset={gconf.WHISPERX_VAD_OFFSET}, "
                         f"chunk={gconf.WHISPERX_CHUNK_SIZE}s); "
@@ -499,10 +573,56 @@ def transcribe_clip(clip: GameplayClip, progress: Progress | None = None,
     src = clip.source_path()
     if src is None:
         raise FriendlyError("No source clip to transcribe.")
+    voice = clip.dir / VOICE_AUDIO_NAME            # extracted by import_source if 2-track
     transcript = transcribe(src, progress=progress, diarize=diarize,
-                            num_speakers=num_speakers)
+                            num_speakers=num_speakers,
+                            voice_audio=voice if voice.exists() else None)
     transcript.save(clip.transcript_path)
+    write_speaker_sidecar(clip, transcript, progress)
+    if not gconf.KEEP_PREP_AUDIO:                   # transient work audio; not the source
+        voice.unlink(missing_ok=True)
+        (clip.dir / PREP_AUDIO_NAME).unlink(missing_ok=True)
     return transcript
+
+
+def speaker_samples(transcript: Transcript) -> dict[str, str]:
+    """{speaker_label: longest contiguous utterance} — a sample line per speaker so the
+    user can eyeball which pyannote label is whom (labels aren't stable across clips)."""
+    best: dict[str, str] = {}
+    cur_spk: str | None = None
+    cur: list[str] = []
+
+    def flush():
+        if cur and cur_spk and len(" ".join(cur)) > len(best.get(cur_spk, "")):
+            best[cur_spk] = " ".join(cur)
+
+    for w in transcript.words:
+        spk = w.speaker or "SPEAKER"
+        if spk != cur_spk:
+            flush()
+            cur_spk, cur = spk, []
+        cur.append(w.text)
+    flush()
+    return best
+
+
+def write_speaker_sidecar(clip: GameplayClip, transcript: Transcript,
+                          progress: Progress | None = None) -> Path | None:
+    """Write clip.dir/speakers.json listing each detected label + a sample line, and log
+    a one-liner. Skipped when single-speaker (nothing to disambiguate). Debug aid only —
+    identity assignment stays manual (map labels → colour in the editor grid)."""
+    if transcript.single_speaker or len(transcript.speakers) < 2:
+        return None
+    samples = speaker_samples(transcript)
+    out = clip.dir / "speakers.json"
+    try:
+        out.write_text(json.dumps(samples, indent=2, ensure_ascii=False), "utf-8")
+    except OSError:
+        pass
+    _emit(progress, "Speakers detected (labels are NOT stable across clips — set each "
+                    "one's colour in the editor grid): "
+                    + "; ".join(f'{k} = "{v[:48]}…"' for k, v in samples.items()))
+    return out
 
 
 def _friendly_transcribe_error(e: Exception) -> FriendlyError:

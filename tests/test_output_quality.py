@@ -69,10 +69,12 @@ def test_fill_layout_offsets_shift_the_crop():
     assert left != right                                   # offset changes the crop
 
 
-def test_default_reframe_mode_is_fill():
-    # v3: fill is the recommended default (gameplay fills the frame); blur_pad stays.
-    assert gconf.REFRAME_MODE == "fill"
-    assert "blur_pad" in reframe_mod.MODES
+def test_default_reframe_mode_is_tall():
+    # "tall" is the default: a full-width gameplay band using most of the vertical height
+    # (no stretch), tuned for ARAM. The other layouts remain available.
+    assert gconf.REFRAME_MODE == "tall"
+    assert {"tall", "fill", "blur_pad"} <= set(reframe_mod.MODES)
+    assert 0.4 <= gconf.REFRAME_TALL_HEIGHT_FRAC <= 1.0
 
 
 # ---- encode count (no GPU; record ffmpeg invocations) ----------------------
