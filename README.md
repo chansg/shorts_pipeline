@@ -16,7 +16,10 @@ stay Ken Burns stills (the cost-saving hybrid).
 python app.py
 ```
 
-One window, eight gated stages, end to end:
+The app opens on a **landing** screen that routes to its modes (Shorts, Gameplay,
+Full-Auto, Settings). The **Shorts** view now leads with the **🎬 Music Montage** tab — gameplay clips + one
+MP3 → a 9:16 montage Short (see the **Music Montage** section below) — followed by the
+original lore-video wizard's eight gated stages, end to end:
 
 ```
 1 Script        pick/edit scripts/<name>.txt — sentence count = scene count
