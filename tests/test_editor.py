@@ -78,6 +78,17 @@ def test_render_has_clickable_speaker_buttons():
     assert "wireSpeakerButtons" in ed.SETUP_JS and "txe-spk" in ed.SETUP_JS
 
 
+def test_editor_shows_per_row_start_time():
+    # each row renders a read-only start-time label (M:SS.d) so you can scrub the video
+    # to it; the timestamps live in the row data (start=r[2], end=r[3]).
+    assert ".tx-time" in ed._STYLE                            # the column is styled
+    assert "tx-time" in ed.SETUP_JS and "fmtT(" in ed.SETUP_JS  # rendered + formatted
+    assert "function fmtT" in ed.SETUP_JS                     # M:SS.d formatter
+    # the row still carries start/end in the embedded data (contract unchanged)
+    rows = [["hey", "SPEAKER_00", 3.2, 3.8, False]]
+    assert _embedded_rows(ed.render_editor(rows))[0][2] == 3.2
+
+
 def test_editor_feeds_same_caption_output_as_rows():
     # equivalence: rows that came from the old grid produce identical caption tuples
     # whether read directly or round-tripped through the editor's embed/commit/parse.

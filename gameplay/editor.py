@@ -91,6 +91,8 @@ def render_editor(rows, spk_rows=None) -> str:
         '<div class="txe-wrap">'
         + _STYLE
         + '<div class="txe-help">'
+        'the <b>time</b> at the left of each row is where it starts in the video '
+        '(hover for start→end) — scrub there to check the speaker. '
         '<b>↑/↓</b> or <b>Enter</b> move · type to fix the word · click a '
         '<b>speaker button</b> (or <b>Alt+1…N</b>) to set the active row / a '
         'shift-selected range · <b>Alt+B</b> speaker to all below · <b>Alt+D</b> delete '
@@ -130,6 +132,8 @@ _STYLE = """<style>
 #tx-root .tx-row.sel{background:rgba(120,120,255,.30);}
 #tx-root .tx-chip{flex:0 0 auto;width:34px;text-align:center;border-radius:4px;color:#000;
   font-weight:700;font-size:11px;cursor:pointer;user-select:none;padding:2px 0;}
+#tx-root .tx-time{flex:0 0 auto;width:60px;text-align:right;font-size:11px;opacity:.6;
+  font-variant-numeric:tabular-nums;user-select:text;padding-right:2px;}
 #tx-root .tx-text{flex:1 1 auto;background:#0d1117;color:#e6edf3;border:1px solid #30363d;
   border-radius:4px;padding:3px 6px;font:inherit;}
 #tx-root .tx-row.active .tx-text{border-color:#7d88ff;}
@@ -193,6 +197,7 @@ SETUP_JS = r"""
     else if(e.altKey && (e.key==='b'||e.key==='B')){ e.preventDefault(); const s=root.__rows[i][1]; for(let k=i;k<root.__rows.length;k++) root.__rows[k][1]=s; render(root); commit(root); focusRow(root,i); }
     else if(e.altKey && (e.key==='d'||e.key==='D')){ e.preventDefault(); root.__rows.splice(i,1); render(root); commit(root); focusRow(root,Math.min(i,root.__rows.length-1)); }
   }
+  function fmtT(v){ v=+v; if(!isFinite(v)||v<0) v=0; const m=Math.floor(v/60), s=v-60*m; return m+':'+(s<10?'0':'')+s.toFixed(1); }
   function render(root){
     let list=root.querySelector('.tx-list');
     if(!list){ list=document.createElement('div'); list.className='tx-list'; root.appendChild(list); }
@@ -203,6 +208,12 @@ SETUP_JS = r"""
       const chip=document.createElement('span'); chip.className='tx-chip'; chip.style.background=color;
       chip.textContent=(spk||'·').replace(/^SPEAKER_?/i,'S')||'·'; chip.title=spk||'(no speaker) — click to select';
       chip.onmousedown=(e)=>{ e.preventDefault(); selectRow(root,i,e.shiftKey); };
+      // read-only start time (M:SS.d) so you can scrub the video to this line; full
+      // start->end in the tooltip. A manually-added row with no timestamp shows '--'.
+      const hasT=(r[2]!=null && r[2]!=='');
+      const tm=document.createElement('span'); tm.className='tx-time';
+      tm.textContent=hasT?fmtT(r[2]):'--';
+      tm.title=hasT?('start '+(+r[2]).toFixed(2)+'s'+(r[3]!=null&&r[3]!==''?'  →  end '+(+r[3]).toFixed(2)+'s':'')):'no timestamp (added row)';
       const inp=document.createElement('input'); inp.className='tx-text'; inp.type='text'; inp.value=r[0]; inp.dataset.i=i;
       inp.addEventListener('keydown',(e)=>onKey(root,e,i));
       inp.addEventListener('input',()=>{ root.__rows[i][0]=inp.value; });
@@ -211,7 +222,7 @@ SETUP_JS = r"""
       const sp=document.createElement('span'); sp.className='tx-spk'; sp.textContent=spk;
       const cz=document.createElement('span'); cz.className='tx-cz'+(r[4]?' on':''); cz.textContent=r[4]?'🔇':'·'; cz.title='censor (click)';
       cz.onclick=()=>{ root.__rows[i][4]=!root.__rows[i][4]; cz.className='tx-cz'+(root.__rows[i][4]?' on':''); cz.textContent=root.__rows[i][4]?'🔇':'·'; commit(root); };
-      row.append(chip,inp,sp,cz); list.appendChild(row);
+      row.append(chip,tm,inp,sp,cz); list.appendChild(row);
     });
     updateSel(root);
   }
