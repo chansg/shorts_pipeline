@@ -49,7 +49,7 @@ FPS = 30
 
 # --- TTS (ElevenLabs only — no fallback) ---
 # Needs ELEVENLABS_API_KEY in your .env. Find voice IDs:  python -m modules.tts voices
-ELEVENLABS_VOICE_ID = "6j8uSqQkZH2WrWDVIiRB"  # default narration voice
+ELEVENLABS_VOICE_ID = "GVfz4EdzyO4sy2N3XOBG"  # default narration voice
 ELEVENLABS_MODEL = "eleven_multilingual_v2"   # best quality; "eleven_flash_v2_5" = cheaper/faster
 ELEVENLABS_STABILITY = 0.3   # lower = more expressive/varied, higher = more consistent
 ELEVENLABS_SIMILARITY = 0.85  # how closely to match the chosen voice's character
