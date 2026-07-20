@@ -213,7 +213,7 @@ python app.py                                  # launches the interface
 Requires **ffmpeg** on PATH. GPU strongly recommended for transcription; the pipeline detects a CPU-only torch build, selects an appropriate model size, and warns rather than failing.
 
 ```bash
-pytest -v                                      # pure-logic tests, no GPU or API keys needed
+pytest -v                                      # 295 tests — pure logic, no GPU or API keys needed
 ```
 
 ---
