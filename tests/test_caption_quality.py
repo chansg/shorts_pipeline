@@ -46,8 +46,13 @@ def test_long_token_is_wrapped_to_frame_width():
 
 
 def test_build_ass_wraps_in_output():
-    ass = build_ass([("ABSOLUTELYRIDICULOUS", 0.0, 0.4, "S0")], _gameplay_style())
+    # a token wider than the frame is split; one that fits stays whole (the gameplay
+    # style measures the rendered width rather than counting letters)
+    ass = build_ass([("ABSOLUTELYRIDICULOUSLYUNBELIEVABLE", 0.0, 0.4, "S0")],
+                    _gameplay_style())
     assert "\\N" in ass
+    fits = build_ass([("ABSOLUTELYRIDICULOUS", 0.0, 0.4, "S0")], _gameplay_style())
+    assert "\\N" not in fits
 
 
 def test_lore_path_unchanged_by_new_fields():

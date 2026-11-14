@@ -69,13 +69,20 @@ def normalize_rows(rows) -> list[list]:
     return out
 
 
-def render_editor(rows, spk_rows=None) -> str:
+def render_editor(rows, spk_rows=None, rev=None) -> str:
     """Build the editor HTML for a gr.HTML value. Carries the rows + speaker colours as
-    escaped data-attributes; the SETUP_JS controller turns it into the interactive list."""
+    escaped data-attributes; the SETUP_JS controller turns it into the interactive list.
+
+    `rev` marks an AUTHORITATIVE load (transcribe / revert): the controller always
+    rebuilds from these rows when the revision changes, even if they happen to equal
+    the last rows it saw — so 'Revert' really discards local edits. Ordinary
+    re-renders (recolour, bulk edits) pass no rev and keep the live rows."""
     rows = normalize_rows(rows)
     colors = speaker_colors(rows, spk_rows)
     data = html.escape(json.dumps(rows), quote=True)
-    spk = html.escape(json.dumps(colors), quote=True)
+    # an ORDERED list of [name, colour] pairs, not an object: JS orders integer-like
+    # object keys ('1', '420') first, which would shift the speaker buttons / Alt+N
+    spk = html.escape(json.dumps([[n, c] for n, c in colors.items()]), quote=True)
     # the legend is now a row of clickable SPEAKER BUTTONS — click one to set the active
     # row's (or a shift-selected range's) speaker; the same as the Alt+1..N hotkey.
     buttons = "".join(
@@ -99,8 +106,9 @@ def render_editor(rows, spk_rows=None) -> str:
         'row · click a row chip to select · click 🔇 to censor. '
         '<span id="txe-selinfo"></span></div>'
         f'<div class="txe-legend">{buttons}</div>'
-        f'<div id="{ROOT_ELEM_ID}" data-rows="{data}" data-speakers="{spk}"></div>'
-        '</div>'
+        f'<div id="{ROOT_ELEM_ID}" data-rows="{data}" data-speakers="{spk}"'
+        + (f' data-rev="{html.escape(str(rev), quote=True)}"' if rev is not None else "")
+        + '></div></div>'
     )
 
 
@@ -203,7 +211,7 @@ SETUP_JS = r"""
     if(!list){ list=document.createElement('div'); list.className='tx-list'; root.appendChild(list); }
     list.innerHTML='';
     root.__rows.forEach((r,i)=>{
-      const spk=r[1]||''; const color=(root.__colors[spk])||'#7d8590';
+      const spk=r[1]||''; const color=root.__colors.get(spk)||'#7d8590';
       const row=document.createElement('div'); row.className='tx-row'; row.dataset.i=i;
       const chip=document.createElement('span'); chip.className='tx-chip'; chip.style.background=color;
       chip.textContent=(spk||'·').replace(/^SPEAKER_?/i,'S')||'·'; chip.title=spk||'(no speaker) — click to select';
@@ -225,20 +233,114 @@ SETUP_JS = r"""
       row.append(chip,tm,inp,sp,cz); list.appendChild(row);
     });
     updateSel(root);
+    // keep the targeted row visibly targeted across a re-render (a speaker button acts
+    // on it), or drop the target if that row no longer exists
+    if(root.__active!=null && root.__active<root.__rows.length) setActive(root,root.__active);
+    else root.__active=null;
   }
   function build(root){
     try{ root.__rows=JSON.parse(root.dataset.rows||'[]'); }catch(e){ root.__rows=[]; }
-    try{ root.__colors=JSON.parse(root.dataset.speakers||'{}'); }catch(e){ root.__colors={}; }
-    root.__spk=Object.keys(root.__colors); root.__sel=new Set(); root.__active=null;
+    root.__sel=new Set(); root.__active=null;
+    restyle(root);
+  }
+  // Re-read the speaker colours and re-render from the LIVE rows (so an uncommitted
+  // edit survives). Needed because Gradio 6 patches gr.HTML in place: it keeps the
+  // #tx-root node but strips the list this controller injected, and a colour/rename-
+  // only re-render leaves data-rows identical, so build() alone would never re-run
+  // and the editor would go blank.
+  // data-speakers is an ordered [[name, colour], ...] list; the order IS the speaker
+  // button / Alt+N order. Colours live in a Map so any name works as a key (an object
+  // would reorder integer-like names and treat 'constructor' etc. as already present).
+  function parseSpeakers(s){
+    let v; try{ v=JSON.parse(s||'[]'); }catch(e){ v=[]; }
+    const pairs=Array.isArray(v)?v:Object.entries(v||{});
+    const colors=new Map(), order=[];
+    pairs.forEach(p=>{
+      if(!Array.isArray(p)) return;
+      const n=String(p[0]==null?'':p[0]);
+      if(!colors.has(n)){ colors.set(n,String(p[1]||'')); order.push(n); }
+    });
+    return {colors, order};
+  }
+  // speaker-button captions follow __spk (index i assigns __spk[i])
+  function labelButtons(root){
+    const wrap=root.closest('.txe-wrap'); if(!wrap) return;
+    wrap.querySelectorAll('.txe-spk').forEach(btn=>{
+      const idx=+btn.dataset.idx, n=root.__spk[idx];
+      if(n!=null && btn.lastChild) btn.lastChild.textContent=(idx+1)+' · '+n;
+    });
+  }
+  function restyle(root){
+    const s=parseSpeakers(root.dataset.speakers);
+    root.__colors=s.colors; root.__spk=s.order; root.__seenSpk=root.dataset.speakers;
+    if(!root.__sel) root.__sel=new Set();
     render(root);
     wireSpeakerButtons(root);
+    labelButtons(root);
+  }
+  // Gradio can unmount the editor (a hidden or inactive container) and later remount
+  // it from the LAST VALUE THE SERVER SENT — which predates every edit made here since
+  // (a commit never re-renders the editor). If a fresh root carries exactly what the
+  // previous, now-detached root was built from, carry its live rows (and any in-place
+  // renames) over instead of rebuilding stale ones that the next commit would write
+  // back over the user's corrections. A new authoritative load (different rows or a
+  // new data-rev) still rebuilds.
+  function adopt(root){
+    const live=window.__txeLive;
+    if(!live || live===root || live.isConnected || !live.__rows) return false;
+    if(root.dataset.rows!==live.__seen) return false;
+    const rev=root.dataset.rev;
+    if(rev && rev!==live.__rev) return false;
+    root.__rows=live.__rows; root.__seen=live.__seen; root.__rev=live.__rev;
+    root.__sel=new Set(); root.__active=live.__active;
+    if(root.dataset.speakers===live.__seenSpk){
+      root.__colors=live.__colors; root.__spk=live.__spk; root.__seenSpk=live.__seenSpk;
+      render(root); wireSpeakerButtons(root); labelButtons(root);
+    } else restyle(root);
+    return true;
   }
   function scan(){
     document.querySelectorAll('#tx-root').forEach(root=>{
-      if(root.dataset.rows !== root.__seen){ root.__seen=root.dataset.rows; build(root); }
+      // an authoritative load (transcribe / revert) carries a fresh data-rev: always
+      // rebuild from its rows, even if they equal the last rows seen (Revert must
+      // discard local edits); ordinary re-renders carry no rev and keep live rows
+      const rev=root.dataset.rev;
+      if(root.__seen===undefined && adopt(root)){ /* remounted: live rows carried over */ }
+      else if(root.dataset.rows !== root.__seen || (rev && rev !== root.__rev)){
+        root.__seen=root.dataset.rows; if(rev) root.__rev=rev; build(root);
+      }
+      else if(root.__rows && (!root.querySelector('.tx-list') || root.dataset.speakers !== root.__seenSpk)){ restyle(root); }
+      if(root.__rows) window.__txeLive=root;
     });
   }
-  new MutationObserver(scan).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['data-rows']});
+  // In-place player rename, called by a player card the moment its name field blurs —
+  // BEFORE the server answers. Relabels the rows, chips, speaker spans, colour map and
+  // speaker-button text without rebuilding a single input, so focus and typing in a
+  // row survive, and a Build clicked straight away already reads the new labels. Each
+  // button keeps its index: on a merge (renamed onto an existing name) the old button
+  // also assigns the merged name until the server's full refresh rebuilds the buttons.
+  window.__txeRename=function(oldN,newN){
+    oldN=String(oldN||'').trim(); newN=String(newN||'').trim();
+    if(!oldN||!newN||oldN===newN) return;
+    document.querySelectorAll('#tx-root').forEach(root=>{
+      if(!root.__rows||!root.__colors||!root.__colors.has(oldN)) return;
+      const merge=root.__colors.has(newN);
+      const color=merge?root.__colors.get(newN):root.__colors.get(oldN);
+      root.__rows.forEach(r=>{ if(String(r[1]||'').trim()===oldN) r[1]=newN; });
+      const m=new Map();      // rename the key in place (a Map keeps insertion order)
+      root.__colors.forEach((c,k)=>{ if(k!==oldN) m.set(k,c); else if(!merge) m.set(newN,c); });
+      root.__colors=m;
+      root.__spk=root.__spk.map(n=>n===oldN?newN:n);
+      rowsEls(root).forEach(el=>{
+        const r=root.__rows[+el.dataset.i]; if(!r||String(r[1]||'').trim()!==newN) return;
+        const chip=el.querySelector('.tx-chip');
+        if(chip){ chip.textContent=newN.replace(/^SPEAKER_?/i,'S')||'·'; chip.title=newN; chip.style.background=color; }
+        const sp=el.querySelector('.tx-spk'); if(sp) sp.textContent=newN;
+      });
+      labelButtons(root);
+    });
+  };
+  new MutationObserver(scan).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['data-rows','data-speakers','data-rev']});
   scan();
   setInterval(scan, 1000);
 }

@@ -165,6 +165,34 @@ CAPTION_MIN_DUR_S = 0.4             # minimum on-screen time per cue (anti-flash
 CAPTION_MAX_GAP_S = 0.8             # bridge gaps smaller than this (don't blink off)
 CAPTION_OFFSET_S = 0.0             # global lead(-)/lag(+) nudge for residual drift (s)
 
+# --- Caption look (user-customisable per build in the Gameplay tab -> Style -> Captions) ---
+# Defaults reproduce the original look exactly, so an untouched build is unchanged.
+CAPTION_ON_BY_DEFAULT = True       # "Player captions" switch; Off = no transcript needed
+CAPTION_OUTLINE = 7.0              # text outline (stroke) thickness
+CAPTION_UPPERCASE = True
+CAPTION_ANIMATE = True             # pop-in scale animation on each caption
+CAPTION_BY_PLAYER = True           # colour each line by its player (else one colour)
+CAPTION_SINGLE_COLOR = "#FFFFFF"   # text colour when NOT colouring by player
+CAPTION_FONTS = ["Anton", "Arial"]  # Anton is bundled in fonts/; Arial is a system font
+# One-click looks. Every field stays editable afterwards (the preset flips to "Custom").
+CAPTION_PRESETS = {
+    "Bold pop": {"font": "Anton", "size": CAPTION_FONTSIZE, "outline": 7.0,
+                 "uppercase": True, "animate": True, "mode": "phrase",
+                 "by_player": True, "color": "#FFFFFF"},
+    "Karaoke": {"font": "Anton", "size": CAPTION_FONTSIZE, "outline": 7.0,
+                "uppercase": True, "animate": True, "mode": "word",
+                "by_player": True, "color": "#FFFFFF"},
+    "Clean": {"font": "Arial", "size": int(round(CAPTION_FONTSIZE * 0.75)),
+              "outline": 4.0, "uppercase": False, "animate": False, "mode": "phrase",
+              "by_player": True, "color": "#FFFFFF"},
+    "Minimal": {"font": "Arial", "size": int(round(CAPTION_FONTSIZE * 0.65)),
+                "outline": 3.0, "uppercase": False, "animate": False, "mode": "phrase",
+                "by_player": False, "color": "#FFFFFF"},
+}
+CAPTION_DEFAULT_PRESET = "Bold pop"
+# Player cards in the transcript step (one per diarised speaker / named player).
+MAX_PLAYER_CARDS = 8
+
 # --- Profanity censor (gameplay/censor.py) ---
 # Bleep/mute the audio AND mask the caption on curse words, driven off the WhisperX
 # word spans (a censored word is the same (text,start,end) the captions use). A word
