@@ -22,6 +22,7 @@ original gap-fill behaviour is preserved exactly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 # RGB palette auto-assigned to speakers (in order of first appearance) when no
 # explicit colour is set. Module-level so callers (e.g. the gameplay transcript
@@ -72,6 +73,7 @@ class CaptionStyle:
     uppercase: bool = True
     pop_in_ms: int = 120             # scale-up duration
     settle_ms: int = 90              # overshoot -> settle
+    animate: bool = True             # False = static text (no pop-in scale transform)
     fade_ms: int = 40
     min_hold_s: float = 0.18         # never flash a word shorter than this
     gap_fill: bool = True            # extend each word until the next begins (no flicker)
@@ -88,6 +90,13 @@ class CaptionStyle:
     max_event_s: float | None = None   # cap how long any one cue stays on screen
     max_line_chars: int = 0            # wrap/hard-split so no line exceeds frame width
     prevent_overlap: bool = False      # snap a cue's end to the next cue's start
+    # Optional pixel-accurate wrapping (gameplay): `text_px(line)` -> rendered width in
+    # script pixels, and the widest a line may be. With both set, a line still breaks
+    # at max_line_chars (the look) AND whenever it would be wider than max_line_px, but
+    # a word is only hard-split when it truly is wider than max_line_px — never merely
+    # for having more letters than max_line_chars.
+    text_px: Callable[[str], float] | None = None
+    max_line_px: float = 0.0
 
 
 def _header(st: CaptionStyle) -> str:
@@ -125,25 +134,42 @@ def _resolve_speaker_color(st: CaptionStyle, speaker, assigned: dict) -> str | N
     return _ass_color(*assigned[speaker])
 
 
-def _wrap_text(text: str, max_chars: int) -> str:
+def _wrap_text(text: str, max_chars: int,
+               text_px: Callable[[str], float] | None = None,
+               max_px: float = 0.0) -> str:
     """Wrap to <=max_chars per line at word boundaries, hard-splitting any single
     token longer than the limit, so no line can exceed the frame width. Uses ASS
-    line breaks (\\N). No-op when max_chars<=0 (the lore path)."""
-    if max_chars <= 0:
+    line breaks (\\N). No-op when max_chars<=0 (the lore path).
+
+    With `text_px` + `max_px` (measured mode) a line also breaks before it gets wider
+    than max_px, and a token is hard-split only where it is really wider than max_px
+    (at the longest prefix that fits) — a long word that fits stays whole."""
+    measured = text_px is not None and max_px > 0
+    if max_chars <= 0 and not measured:
         return text
     tokens: list[str] = []
     for word in text.split():
-        while len(word) > max_chars:           # hard-split an over-long token
-            tokens.append(word[:max_chars])
-            word = word[max_chars:]
+        if measured:
+            while len(word) > 1 and text_px(word) > max_px:
+                k = len(word) - 1
+                while k > 1 and text_px(word[:k]) > max_px:
+                    k -= 1
+                tokens.append(word[:k])
+                word = word[k:]
+        else:
+            while len(word) > max_chars:       # hard-split an over-long token
+                tokens.append(word[:max_chars])
+                word = word[max_chars:]
         tokens.append(word)
     lines: list[str] = []
     cur = ""
     for tok in tokens:
+        cand = f"{cur} {tok}"
         if not cur:
             cur = tok
-        elif len(cur) + 1 + len(tok) <= max_chars:
-            cur += " " + tok
+        elif ((max_chars <= 0 or len(cand) <= max_chars)
+              and (not measured or text_px(cand) <= max_px)):
+            cur = cand
         else:
             lines.append(cur)
             cur = tok
@@ -152,20 +178,29 @@ def _wrap_text(text: str, max_chars: int) -> str:
     return "\\N".join(lines)
 
 
+def wrap_lines(st: CaptionStyle, text: str) -> list[str]:
+    """The lines one cue's text renders as under this style (case + wrapping applied)
+    — lets a caller check a cue's height before rendering it."""
+    if st.uppercase:
+        text = text.upper()
+    return _wrap_text(text, st.max_line_chars, st.text_px, st.max_line_px).split("\\N")
+
+
 def _cue_text(st: CaptionStyle, text: str, color: str | None = None) -> str:
     if st.uppercase:
         text = text.upper()
-    text = _wrap_text(text, st.max_line_chars)
+    text = _wrap_text(text, st.max_line_chars, st.text_px, st.max_line_px)
     x = st.play_w // 2
     y = int(st.play_h * st.pos_y_frac)
     color_tag = f"\\c{color}&" if color else ""
-    # pop: small -> overshoot -> settle, with a quick fade-in/out
-    anim = (
-        f"\\pos({x},{y})\\an5\\fad({st.fade_ms},{st.fade_ms}){color_tag}"
-        f"\\fscx70\\fscy70"
-        f"\\t(0,{st.pop_in_ms},\\fscx112\\fscy112)"
-        f"\\t({st.pop_in_ms},{st.pop_in_ms + st.settle_ms},\\fscx100\\fscy100)"
-    )
+    anim = f"\\pos({x},{y})\\an5\\fad({st.fade_ms},{st.fade_ms}){color_tag}"
+    if st.animate:
+        # pop: small -> overshoot -> settle, with a quick fade-in/out
+        anim += (
+            f"\\fscx70\\fscy70"
+            f"\\t(0,{st.pop_in_ms},\\fscx112\\fscy112)"
+            f"\\t({st.pop_in_ms},{st.pop_in_ms + st.settle_ms},\\fscx100\\fscy100)"
+        )
     return "{" + anim + "}" + text.replace("\n", " ")
 
 

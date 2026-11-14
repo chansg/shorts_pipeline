@@ -22,9 +22,19 @@ def test_render_embeds_rows_and_speaker_colours():
     out = ed.render_editor(rows, [["SPEAKER_00", "#ff0000"]])
     assert 'id="tx-root"' in out
     assert _embedded_rows(out) == ed.normalize_rows(rows)     # rows survive the embed
-    colors = json.loads(html.unescape(re.search(r'data-speakers="([^"]*)"', out).group(1)))
+    pairs = json.loads(html.unescape(re.search(r'data-speakers="([^"]*)"', out).group(1)))
+    colors = dict(pairs)
     assert colors["SPEAKER_00"] == "#ff0000"                 # explicit hex wins
     assert colors["SPEAKER_01"].startswith("#")              # palette colour assigned
+
+
+def test_speakers_are_embedded_as_an_ordered_list():
+    # an ordered [[name, colour], ...] list, not an object: JS would put integer-like
+    # keys ('2', '420') first and shift the speaker buttons / Alt+N mapping
+    out = ed.render_editor([["hi", "SPEAKER_00", 0, 0.4, False]],
+                           [["SPEAKER_00", "#ff0000"], ["2", "#00ff00"]])
+    pairs = json.loads(html.unescape(re.search(r'data-speakers="([^"]*)"', out).group(1)))
+    assert [p[0] for p in pairs] == ["SPEAKER_00", "2"]
 
 
 def test_render_empty_is_placeholder():
@@ -87,6 +97,46 @@ def test_editor_shows_per_row_start_time():
     # the row still carries start/end in the embedded data (contract unchanged)
     rows = [["hey", "SPEAKER_00", 3.2, 3.8, False]]
     assert _embedded_rows(ed.render_editor(rows))[0][2] == 3.2
+
+
+def test_editor_self_heals_after_in_place_html_patch():
+    # Regression: Gradio 6 patches gr.HTML in place — it keeps #tx-root but strips the
+    # injected row list. A colour-only re-render leaves data-rows identical, so the
+    # controller must ALSO re-render when the list is missing or data-speakers changed
+    # (otherwise recolouring a player blanked the editor).
+    js = ed.SETUP_JS
+    assert "function restyle" in js
+    assert "!root.querySelector('.tx-list')" in js
+    assert "root.dataset.speakers !== root.__seenSpk" in js
+    assert "attributeFilter:['data-rows','data-speakers','data-rev']" in js
+
+
+def test_authoritative_loads_carry_a_revision():
+    # Regression (review): Revert re-sent rows identical to the last render, so the
+    # editor never rebuilt and the build kept the discarded edits. Loads now carry a
+    # data-rev the controller always rebuilds on; ordinary re-renders carry none.
+    rows = [["hi", "S0", 0.0, 0.4, False]]
+    assert 'data-rev="123"' in ed.render_editor(rows, rev=123)
+    assert "data-rev" not in ed.render_editor(rows)
+    js = ed.SETUP_JS
+    assert "rev && rev !== root.__rev" in js
+
+
+def test_player_rename_relabels_the_editor_in_place():
+    # Regression (review): a rename used to re-render the editor (stealing focus from
+    # a row just clicked into) and a Build clicked right after could read the old
+    # labels. The cards now call this client-side relabel on blur instead.
+    js = ed.SETUP_JS
+    assert "window.__txeRename=function(oldN,newN)" in js
+    # relabels rows/chips/spans/buttons without rebuilding inputs
+    rename_body = js.split("window.__txeRename=function(oldN,newN)", 1)[1] \
+        .split("new MutationObserver", 1)[0]
+    assert "innerHTML" not in rename_body and "render(root)" not in rename_body
+
+
+def test_render_keeps_the_targeted_row_highlighted():
+    assert "if(root.__active!=null && root.__active<root.__rows.length) " \
+           "setActive(root,root.__active);" in ed.SETUP_JS
 
 
 def test_editor_feeds_same_caption_output_as_rows():
